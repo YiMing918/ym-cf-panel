@@ -98,7 +98,7 @@ const Q_ZONE_HTTP = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(f
 } } }`;
 const Q_ZONE_STATUS = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
   httpRequestsAdaptiveGroups(limit: 30, filter: {datetime_geq: $s, datetime_leq: $e}, orderBy: [count_DESC]) {
-    count dimensions { responseStatus } }
+    count dimensions { edgeResponseStatus } }
 } } }`;
 const Q_ZONE_PATHS = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
   httpRequestsAdaptiveGroups(limit: 10, filter: {datetime_geq: $s, datetime_leq: $e}, orderBy: [count_DESC]) {
@@ -255,7 +255,7 @@ export async function getUsage(account, range) {
           const v = { z: z.id, s: w.startISO, e: w.endISO };
           const [qs, qp, qc] = await Promise.allSettled([gql(account, Q_ZONE_STATUS, v), gql(account, Q_ZONE_PATHS, v), gql(account, Q_ZONE_CACHE, v)]);
           if (qs.status === 'fulfilled') for (const row of (((qs.value.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [])) {
-            const c = row.dimensions.responseStatus; if (c) statusMap[c] = (statusMap[c] || 0) + (row.count || 0);
+            const c = row.dimensions.edgeResponseStatus; if (c) statusMap[c] = (statusMap[c] || 0) + (row.count || 0);
           }
           if (qp.status === 'fulfilled') for (const row of (((qp.value.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [])) {
             const p = row.dimensions.clientRequestPath || '/'; pathMap[p] = (pathMap[p] || 0) + (row.count || 0);

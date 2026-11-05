@@ -1077,7 +1077,7 @@ async function loadEmail() {
     <div><label class="mlab">转发到（需先在下方目标地址里验证）</label><input class="minput" id="emTo" placeholder="you@gmail.com"></div>
     <div><button class="btn sm" id="emAdd">添加规则</button></div></div>
     <div style="margin-top:10px"><b>目标地址（账号级）</b>
-    ${dest.addresses.map((d) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)">${esc(d.email)} <span class="tag">${d.verified ? '已验证' : '未验证'}</span></div>`).join('') || '<p class="hint">读不到目标地址（可能缺 Email Routing Addresses 权限）</p>'}</div>`;
+    ${dest.addresses.map((d) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)">${esc(d.email)} <span class="tag">${d.verified ? '已验证' : '未验证'}</span></div>`).join('') || (dest.error ? `<p class="hint">目标地址读取失败：${esc(dest.error)}</p>` : '<p class="hint">暂无目标地址（在 Cloudflare 控制台的邮件路由里添加并验证一个邮箱后，这里就能选）</p>')}</div>`;
     $('#emToggle').addEventListener('click', async () => {
       try { await api('/api/emailroute', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle', enabled: !r.enabled }) }); toast('已更新'); loadEmail(); }
       catch (e) { toast(e.message); }

@@ -80,6 +80,12 @@
   .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
   .backlink{color:var(--accent);cursor:pointer;font-size:14px;font-weight:600}
+  .minput{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font-size:14px}
+  textarea.minput{resize:vertical;min-height:64px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+  .mrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:8px 0;align-items:end}
+  .mlab{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+  .warnbox{background:#fff7e8;border:1px solid #ffd9a0;color:#8a5a00;border-radius:10px;padding:8px 11px;font-size:12.5px;margin:8px 0}
+  [data-theme="dark"] .warnbox{background:#2a2110;color:#fcd34d;border-color:#4a3a14}
   @media(max-width:640px){ .grid{grid-template-columns:1fr} h1{font-size:19px} }
 </style>
 </head>
@@ -491,8 +497,17 @@ function renderDetail(id) {
   } else html += `<div class="err">${esc(d.inventory.error)}</div>`;
   html += '</section>';
 
+  // Management (v2)
+  html += `<section class="blk"><h2>🛠️ 管理（可操作）</h2>
+  <p class="hint" style="margin-bottom:10px">以下操作会真实修改你的 Cloudflare 账号，需要令牌带对应的编辑权限；缺权限时对应功能会报错提示。</p>
+  <div class="seg" id="mTabs">
+    <button data-mtab="dns" class="on">DNS 记录</button><button data-mtab="domain">域名</button><button data-mtab="kv">KV 数据</button><button data-mtab="d1">D1 控制台</button><button data-mtab="deploy">部署</button><button data-mtab="purge">清缓存</button>
+  </div>
+  <div id="mBody" style="margin-top:12px"></div></section>`;
+
   $('#main').innerHTML = html;
   $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); });
+  initManage(a, inv);
 }
 
 /* ---------- public + boot ---------- */
@@ -521,6 +536,271 @@ async function boot() {
   if (S.authed) loadAll(false); else renderPublic();
 }
 boot().catch((e) => { $('#main').innerHTML = `<div class="err" style="margin-top:14px">初始化失败：${esc(e.message)}（多半是还没绑定 PANEL_KV 或绑定名不对）</div>`; });
+</script>
+<script>
+/* ---------- management (v2) ---------- */
+const M = { acct: null, inv: {}, tab: 'dns', zone: null, ns: null, db: null, project: null, script: null, dnsEdit: null, kvCursor: null };
+const mErr = (e) => `<div class="err">${esc(e.message)}</div>`;
+function selHtml(id, items, val, label) {
+  return `<select class="minput" id="${id}">${items.map((x) => `<option value="${esc(x.value)}" ${String(x.value) === String(val) ? 'selected' : ''}>${esc(label(x))}</option>`).join('')}</select>`;
+}
+function arm(btn, fn) {
+  if (btn.dataset.arm) { fn(); return; }
+  btn.dataset.arm = '1'; const old = btn.textContent; btn.textContent = '再点一次确认';
+  setTimeout(() => { delete btn.dataset.arm; btn.textContent = old; }, 3200);
+}
+function initManage(acct, inv) {
+  M.acct = acct; M.inv = inv || {};
+  M.zone = (M.inv.zones || [])[0]?.id || null;
+  M.ns = (M.inv.kvNamespaces || [])[0]?.id || null;
+  M.db = (M.inv.databases || [])[0]?.id || null;
+  M.project = (M.inv.projects || [])[0]?.name || null;
+  M.script = (M.inv.scripts || [])[0]?.name || null;
+  $$('#mTabs button').forEach((b) => b.addEventListener('click', () => {
+    $$('#mTabs button').forEach((x) => x.classList.toggle('on', x === b));
+    M.tab = b.dataset.mtab; loadMTab();
+  }));
+  loadMTab();
+}
+function loadMTab() {
+  ({ dns: loadDns, domain: loadDomain, kv: loadKv, d1: loadD1, deploy: loadDeploy, purge: loadPurge })[M.tab]();
+}
+const zoneSel = (id) => selHtml(id, (M.inv.zones || []).map((z) => ({ value: z.id, name: z.name })), M.zone, (x) => x.name);
+const noRes = (what) => `<p class="hint">这个账号没有${what}（或令牌缺对应读取权限）。</p>`;
+
+/* ----- DNS ----- */
+async function loadDns() {
+  const body = $('#mBody');
+  if (!M.zone) { body.innerHTML = noRes('域名'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('dnsZone')}</div></div><div id="dnsList"><p class="hint"><span class="spin"></span> 加载记录…</p></div>
+  <div style="margin-top:14px"><b id="dnsFormTitle">新增记录</b>
+  <div class="mrow">
+    <div><label class="mlab">类型</label><select class="minput" id="dnsType">${['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS', 'CAA', 'SRV'].map((t) => `<option>${t}</option>`).join('')}</select></div>
+    <div><label class="mlab">名称（如 www 或 @）</label><input class="minput" id="dnsName" placeholder="www"></div>
+    <div><label class="mlab">内容</label><input class="minput" id="dnsContent" placeholder="目标 IP / 域名 / 文本"></div>
+    <div><label class="mlab">TTL（1=自动）</label><input class="minput" id="dnsTtl" type="number" value="1"></div>
+    <div><label class="mlab">优先级（MX）</label><input class="minput" id="dnsPrio" type="number" value="10"></div>
+    <div><label class="mlab">代理（橙云）</label><select class="minput" id="dnsProxied"><option value="">关闭</option><option value="1">开启</option></select></div>
+  </div>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="dnsSave">保存记录</button><button class="btn ghost sm" id="dnsCancel" style="display:none">取消编辑</button></div></div>`;
+  $('#dnsZone').addEventListener('change', (e) => { M.zone = e.target.value; M.dnsEdit = null; loadDns(); });
+  $('#dnsSave').addEventListener('click', saveDns);
+  $('#dnsCancel').addEventListener('click', () => { M.dnsEdit = null; loadDns(); });
+  await refreshDnsList();
+}
+async function refreshDnsList() {
+  const box = $('#dnsList'); if (!box) return;
+  try {
+    const r = await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}`);
+    box.innerHTML = tableHtml(['类型', '名称', '内容', 'TTL', '代理', '操作'], r.records.map((x) => `<tr>
+      <td><b>${esc(x.type)}</b></td><td>${esc(x.name)}</td><td>${esc(x.content)}</td><td>${x.ttl === 1 ? '自动' : x.ttl}</td><td>${x.proxied ? '🟠 开' : '—'}</td>
+      <td style="white-space:nowrap"><button class="btn ghost sm" data-dns-edit="${x.id}">编辑</button> <button class="btn danger sm" data-dns-del="${x.id}">删除</button></td></tr>`))
+      || '<p class="hint">暂无记录</p>';
+    box.querySelectorAll('[data-dns-edit]').forEach((b) => b.addEventListener('click', () => {
+      const rec = r.records.find((x) => x.id === b.dataset.dnsEdit); if (!rec) return;
+      M.dnsEdit = rec.id;
+      $('#dnsFormTitle').textContent = '编辑记录';
+      $('#dnsType').value = rec.type; $('#dnsName').value = rec.name; $('#dnsContent').value = rec.content;
+      $('#dnsTtl').value = rec.ttl; $('#dnsPrio').value = rec.priority || 10; $('#dnsProxied').value = rec.proxied ? '1' : '';
+      $('#dnsCancel').style.display = '';
+      scrollTo({ top: $('#dnsFormTitle').getBoundingClientRect().top + scrollY - 140, behavior: 'smooth' });
+    }));
+    box.querySelectorAll('[data-dns-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}&id=${b.dataset.dnsDel}`, { method: 'DELETE' }); toast('记录已删除'); refreshDnsList(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function saveDns() {
+  const body = { account: M.acct.id, zone: M.zone, type: $('#dnsType').value, name: $('#dnsName').value, content: $('#dnsContent').value, ttl: $('#dnsTtl').value, priority: $('#dnsPrio').value, proxied: $('#dnsProxied').value === '1' };
+  try {
+    if (M.dnsEdit) await api('/api/dns', { method: 'PUT', body: JSON.stringify({ ...body, id: M.dnsEdit }) });
+    else await api('/api/dns', { method: 'POST', body: JSON.stringify(body) });
+    toast('已保存'); M.dnsEdit = null; loadDns();
+  } catch (e) { toast(e.message); }
+}
+
+/* ----- Domain: SSL + Pages domains ----- */
+async function loadDomain() {
+  const body = $('#mBody');
+  if (!M.zone && !M.project) { body.innerHTML = noRes('域名或 Pages 项目'); return; }
+  let html = '';
+  if (M.zone) html += `<b>SSL/TLS 加密模式</b><div class="mrow"><div><label class="mlab">域名</label>${zoneSel('domZone')}</div>
+    <div><label class="mlab">当前模式</label><div id="sslCur" class="minput" style="background:var(--chip)">加载中…</div></div>
+    <div><label class="mlab">改成</label><select class="minput" id="sslMode"><option value="off">关闭（不加密）</option><option value="flexible">灵活</option><option value="full">完全</option><option value="strict">完全（严格）</option></select></div>
+    <div><button class="btn sm" id="sslSave">保存模式</button></div></div>`;
+  if (M.project) html += `<div style="margin-top:16px"><b>Pages 项目自定义域名</b><div class="mrow"><div><label class="mlab">项目</label>${selHtml('pdProject', (M.inv.projects || []).map((p) => ({ value: p.name, name: p.name })), M.project, (x) => x.name)}</div></div>
+    <div id="pdList"><p class="hint"><span class="spin"></span> 加载…</p></div>
+    <div class="mrow"><div><label class="mlab">绑定新域名（如 app.example.com）</label><input class="minput" id="pdName" placeholder="sub.example.com"></div>
+    <div><button class="btn sm" id="pdAdd">绑定</button></div></div>
+    <p class="hint">绑定后还需在该域名所在账号里加一条指向项目 pages.dev 的 CNAME 记录（同账号会自动生成）。</p></div>`;
+  body.innerHTML = html;
+  if (M.zone) {
+    $('#domZone').addEventListener('change', (e) => { M.zone = e.target.value; loadDomain(); });
+    $('#sslSave').addEventListener('click', async () => {
+      try { await api('/api/domains', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'ssl', zone: M.zone, mode: $('#sslMode').value }) }); toast('SSL 模式已更新'); loadDomain(); }
+      catch (e) { toast(e.message); }
+    });
+    try { const r = await api(`/api/domains?account=${M.acct.id}&what=ssl&zone=${M.zone}`); $('#sslCur').textContent = r.ssl || '未知'; $('#sslMode').value = r.ssl || 'flexible'; }
+    catch (e) { $('#sslCur').textContent = '读取失败：' + e.message; }
+  }
+  if (M.project) {
+    $('#pdProject').addEventListener('change', (e) => { M.project = e.target.value; loadDomain(); });
+    $('#pdAdd').addEventListener('click', async () => {
+      try { await api('/api/domains', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'pagesdomain-add', project: M.project, name: $('#pdName').value }) }); toast('已提交绑定'); refreshPdList(); }
+      catch (e) { toast(e.message); }
+    });
+    refreshPdList();
+  }
+}
+async function refreshPdList() {
+  const box = $('#pdList'); if (!box) return;
+  try {
+    const r = await api(`/api/domains?account=${M.acct.id}&what=pagesdomains&project=${encodeURIComponent(M.project)}`);
+    box.innerHTML = r.domains.length ? r.domains.map((d) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(d.name)}</span><span class="tag">${esc(d.status || '')}</span><button class="btn danger sm" data-pd-del="${esc(d.name)}">解绑</button></div>`).join('') : '<p class="hint">还没有绑定自定义域名（默认用 pages.dev 域名）。</p>';
+    box.querySelectorAll('[data-pd-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/domains?account=${M.acct.id}&project=${encodeURIComponent(M.project)}&name=${encodeURIComponent(b.dataset.pdDel)}`, { method: 'DELETE' }); toast('已解绑'); refreshPdList(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+
+/* ----- KV data ----- */
+async function loadKv() {
+  const body = $('#mBody');
+  if (!M.ns) { body.innerHTML = noRes('KV 命名空间'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">命名空间</label>${selHtml('kvNs', (M.inv.kvNamespaces || []).map((k) => ({ value: k.id, name: k.title })), M.ns, (x) => x.name)}</div>
+  <div><label class="mlab">按前缀搜索键</label><input class="minput" id="kvPrefix" placeholder="可留空"></div>
+  <div><button class="btn sm" id="kvSearch">查询</button> <button class="btn ghost sm" id="kvNew">＋ 新键</button></div></div>
+  <div id="kvList"><p class="hint"><span class="spin"></span> 加载键…</p></div><div id="kvEditor"></div>`;
+  $('#kvNs').addEventListener('change', (e) => { M.ns = e.target.value; loadKv(); });
+  $('#kvSearch').addEventListener('click', () => refreshKvList(true));
+  $('#kvNew').addEventListener('click', () => openKvEditor('', '', true));
+  refreshKvList(true);
+}
+async function refreshKvList(reset) {
+  const box = $('#kvList'); if (!box) return;
+  if (reset) { M.kvCursor = null; box.innerHTML = '<p class="hint"><span class="spin"></span> 加载键…</p>'; }
+  try {
+    const r = await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&prefix=${encodeURIComponent($('#kvPrefix')?.value || '')}${M.kvCursor ? '&cursor=' + encodeURIComponent(M.kvCursor) : ''}`);
+    const rows = r.keys.map((k) => `<tr><td>${esc(k.name)}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-kv-open="${esc(k.name)}">查看/编辑</button></td></tr>`).join('');
+    if (reset) box.innerHTML = (tableHtml(['键名', '操作'], r.keys.map((k) => `<tr><td>${esc(k.name)}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-kv-open="${esc(k.name)}">查看/编辑</button></td></tr>`)) ) + (r.cursor ? '<div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="kvMore">加载更多</button></div>' : '');
+    M.kvCursor = r.cursor;
+    box.querySelectorAll('[data-kv-open]').forEach((b) => b.addEventListener('click', async () => {
+      try { const v = await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&key=${encodeURIComponent(b.dataset.kvOpen)}`); openKvEditor(v.key, v.value, false); }
+      catch (e) { toast(e.message); }
+    }));
+    const more = $('#kvMore'); if (more) more.addEventListener('click', () => refreshKvList(false));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+function openKvEditor(key, value, isNew) {
+  const ed = $('#kvEditor'); if (!ed) return;
+  ed.innerHTML = `<div style="margin-top:14px"><b>${isNew ? '新建键' : '编辑键'}</b>
+  <div class="mrow"><div><label class="mlab">键名</label><input class="minput" id="kvKey" value="${esc(key)}" ${isNew ? '' : 'readonly'}></div></div>
+  <label class="mlab">值</label><textarea class="minput" id="kvVal" rows="7">${esc(value)}</textarea>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="kvSaveBtn">保存</button>
+  ${isNew ? '' : '<button class="btn danger sm" id="kvDelBtn">删除此键</button>'}<button class="btn ghost sm" id="kvCloseBtn">关闭</button></div></div>`;
+  $('#kvCloseBtn').addEventListener('click', () => { ed.innerHTML = ''; });
+  $('#kvSaveBtn').addEventListener('click', async () => {
+    try { await api('/api/kvdata', { method: 'PUT', body: JSON.stringify({ account: M.acct.id, ns: M.ns, key: $('#kvKey').value, value: $('#kvVal').value }) }); toast('已保存'); ed.innerHTML = ''; refreshKvList(true); }
+    catch (e) { toast(e.message); }
+  });
+  const del = $('#kvDelBtn');
+  if (del) del.addEventListener('click', () => arm(del, async () => {
+    try { await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&key=${encodeURIComponent(key)}`, { method: 'DELETE' }); toast('已删除'); ed.innerHTML = ''; refreshKvList(true); }
+    catch (e) { toast(e.message); }
+  }));
+}
+
+/* ----- D1 console ----- */
+async function loadD1() {
+  const body = $('#mBody');
+  if (!M.db) { body.innerHTML = noRes('D1 数据库'); return; }
+  body.innerHTML = `<div class="warnbox">⚠️ 这里执行的是<b>真实 SQL</b>：SELECT 只是查询，但 INSERT / UPDATE / DELETE / DROP 会真的改数据，执行前看清楚。</div>
+  <div class="mrow"><div><label class="mlab">数据库</label>${selHtml('d1Db', (M.inv.databases || []).map((d) => ({ value: d.id, name: d.name })), M.db, (x) => x.name)}</div></div>
+  <div id="d1Tables" class="chips" style="margin:6px 0"></div>
+  <label class="mlab">SQL</label><textarea class="minput" id="sqlBox" rows="4" placeholder="SELECT * FROM 表名 LIMIT 50"></textarea>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="sqlRun">执行</button></div>
+  <div id="sqlOut" style="margin-top:10px"></div>`;
+  $('#d1Db').addEventListener('change', (e) => { M.db = e.target.value; loadD1(); });
+  $('#sqlRun').addEventListener('click', async () => {
+    const out = $('#sqlOut'); out.innerHTML = '<p class="hint"><span class="spin"></span> 执行中…</p>';
+    try {
+      const r = await api('/api/d1sql', { method: 'POST', body: JSON.stringify({ account: M.acct.id, db: M.db, sql: $('#sqlBox').value }) });
+      const cols = r.rows.length ? Object.keys(r.rows[0]) : [];
+      out.innerHTML = `<p class="hint">完成：返回 ${r.rows.length} 行 · 读取 ${fmt(r.meta.rowsRead || 0)} 行 · 写入 ${fmt(r.meta.rowsWritten || 0)} 行 · 变更 ${r.meta.changes || 0}</p>` +
+        (cols.length ? tableHtml(cols, r.rows.map((row) => `<tr>${cols.map((c) => `<td>${esc(row[c] === null ? 'NULL' : String(row[c]))}</td>`).join('')}</tr>`)) : '');
+    } catch (e) { out.innerHTML = mErr(e); }
+  });
+  try {
+    const t = await api(`/api/d1sql?account=${M.acct.id}&db=${M.db}`);
+    $('#d1Tables').innerHTML = t.tables.map((n) => `<span class="chip2" style="cursor:pointer" data-tbl="${esc(n)}">🗂️ ${esc(n)}</span>`).join('') || '<span class="hint">没有数据表</span>';
+    $$('#d1Tables [data-tbl]').forEach((c) => c.addEventListener('click', () => { $('#sqlBox').value = `SELECT * FROM "${c.dataset.tbl}" LIMIT 50`; }));
+  } catch (e) { $('#d1Tables').innerHTML = mErr(e); }
+}
+
+/* ----- Deploy: Pages + Workers ----- */
+async function loadDeploy() {
+  const body = $('#mBody');
+  let html = '';
+  if (M.project) html += `<b>Pages 项目部署</b><div class="mrow"><div><label class="mlab">项目</label>${selHtml('depProject', (M.inv.projects || []).map((p) => ({ value: p.name, name: p.name })), M.project, (x) => x.name)}</div></div><div id="depList"><p class="hint"><span class="spin"></span> 加载部署…</p></div>`;
+  if (M.script) html += `<div style="margin-top:18px"><b>Workers 版本与部署</b><div class="mrow"><div><label class="mlab">脚本</label>${selHtml('depScript', (M.inv.scripts || []).map((s) => ({ value: s.name, name: s.name })), M.script, (x) => x.name)}</div></div><div id="wList"><p class="hint"><span class="spin"></span> 加载版本…</p></div></div>`;
+  body.innerHTML = html || noRes('Pages 项目或 Workers 脚本');
+  if (M.project) { $('#depProject').addEventListener('change', (e) => { M.project = e.target.value; refreshDepList(); }); refreshDepList(); }
+  if (M.script) { $('#depScript').addEventListener('change', (e) => { M.script = e.target.value; refreshWList(); }); refreshWList(); }
+}
+async function refreshDepList() {
+  const box = $('#depList'); if (!box) return;
+  try {
+    const r = await api(`/api/pagesops?account=${M.acct.id}&project=${encodeURIComponent(M.project)}`);
+    box.innerHTML = tableHtml(['时间', '环境', '状态', '提交', '操作'], r.deployments.map((d) => `<tr>
+      <td>${esc((d.created || '').slice(0, 16).replace('T', ' '))}</td><td>${esc(d.env || '')}</td><td>${esc(d.status || '')}</td><td>${esc(d.source || '')}</td>
+      <td style="white-space:nowrap">${d.env === 'production' ? `<button class="btn ghost sm" data-rb="${d.id}">回滚到此版</button>` : ''} ${d.status === 'failure' ? `<button class="btn ghost sm" data-rt="${d.id}">重试</button>` : ''} ${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">打开</a>` : ''}</td></tr>`))
+      || '<p class="hint">暂无部署记录</p>';
+    box.querySelectorAll('[data-rb]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api('/api/pagesops', { method: 'POST', body: JSON.stringify({ account: M.acct.id, project: M.project, deployment: b.dataset.rb, action: 'rollback' }) }); toast('已回滚'); refreshDepList(); }
+      catch (e) { toast(e.message); }
+    })));
+    box.querySelectorAll('[data-rt]').forEach((b) => b.addEventListener('click', async () => {
+      try { await api('/api/pagesops', { method: 'POST', body: JSON.stringify({ account: M.acct.id, project: M.project, deployment: b.dataset.rt, action: 'retry' }) }); toast('已重试'); refreshDepList(); }
+      catch (e) { toast(e.message); }
+    }));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function refreshWList() {
+  const box = $('#wList'); if (!box) return;
+  try {
+    const r = await api(`/api/workersops?account=${M.acct.id}&script=${encodeURIComponent(M.script)}`);
+    const cur = {};
+    for (const d of r.deployments) for (const v of d.versions) cur[v.id] = v.pct;
+    box.innerHTML = (r.deployments.length ? `<p class="hint">当前部署：${r.deployments.map((d) => `${esc(d.created?.slice(0, 16).replace('T', ' ') || '')}（${d.versions.map((v) => '版本 ' + esc(v.id.slice(0, 8)) + ' · ' + v.pct + '%').join('，')}）`).join('；')}</p>` : '')
+      + tableHtml(['版本', '创建时间', '状态', '操作'], r.versions.map((v) => `<tr><td>#${v.number ?? ''} <span class="small muted">${esc(v.id.slice(0, 8))}</span></td><td>${esc((v.created || '').slice(0, 16).replace('T', ' '))}</td><td>${cur[v.id] ? '🟢 已部署 ' + cur[v.id] + '%' : ''}</td>
+      <td>${cur[v.id] === 100 ? '' : `<button class="btn ghost sm" data-wdep="${v.id}">部署此版本</button>`}</td></tr>`)) || '<p class="hint">暂无版本</p>';
+    box.querySelectorAll('[data-wdep]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api('/api/workersops', { method: 'POST', body: JSON.stringify({ account: M.acct.id, script: M.script, version: b.dataset.wdep }) }); toast('已部署该版本'); refreshWList(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+
+/* ----- Purge cache ----- */
+async function loadPurge() {
+  const body = $('#mBody');
+  if (!M.zone) { body.innerHTML = noRes('域名'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('pgZone')}</div>
+  <div><label class="mlab">方式</label><select class="minput" id="pgMode"><option value="all">清除全部缓存</option><option value="urls">按网址清除</option></select></div></div>
+  <label class="mlab">网址（按网址时填写，一行一个，最多 30 个）</label><textarea class="minput" id="pgUrls" rows="3" placeholder="https://example.com/path"></textarea>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="pgGo">执行清理</button></div>
+  <p class="hint">清缓存只是让边缘节点重新回源拉新内容，不会删源站文件。</p>`;
+  $('#pgZone').addEventListener('change', (e) => { M.zone = e.target.value; });
+  $('#pgGo').addEventListener('click', (e) => arm(e.target, async () => {
+    try {
+      const mode = $('#pgMode').value;
+      await api('/api/purge', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, mode, urls: $('#pgUrls').value.split('\n') }) });
+      toast('缓存已清理');
+    } catch (err) { toast(err.message); }
+  }));
+}
 </script>
 </body>
 </html>

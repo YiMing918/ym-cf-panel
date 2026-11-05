@@ -1,1 +1,526 @@
-<!-- placeholder -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>YM CF 面板</title>
+<style>
+  :root{
+    --bg:#f4f5fb; --card:#ffffff; --text:#0f172a; --muted:#64748b; --line:#e6e8f2;
+    --accent:#6366f1; --accent2:#818cf8; --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
+    --chip:#eef2ff; --shadow:0 8px 24px rgba(15,23,42,.06);
+  }
+  [data-theme="dark"]{
+    --bg:#0b0e1a; --card:#151a2e; --text:#e5e9f5; --muted:#8b93b0; --line:#232842;
+    --chip:#1e2442; --shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;padding:0 14px 90px}
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;align-items:center;gap:10px;padding:18px 2px 10px;flex-wrap:wrap}
+  .logo{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#f97316);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;flex:none}
+  h1{font-size:21px;font-weight:800;letter-spacing:.5px}
+  .sub{color:var(--muted);font-size:12px;margin-top:1px}
+  .sp{flex:1}
+  .tbtn{width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer;font-size:16px}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:11px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn.ghost{background:var(--card);color:var(--text);border:1px solid var(--line)}
+  .btn.sm{padding:6px 12px;font-size:13px;border-radius:9px}
+  .btn.danger{background:var(--bad)}
+  .seg{display:flex;background:var(--card);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .seg button{border:none;background:transparent;color:var(--muted);padding:8px 14px;font-size:13.5px;cursor:pointer;font-weight:600}
+  .seg button.on{background:var(--accent);color:#fff}
+  .totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin:12px 0}
+  .tcard{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:12px 14px;box-shadow:var(--shadow)}
+  .tcard .k{font-size:12px;color:var(--muted)}
+  .tcard .v{font-size:21px;font-weight:800;margin-top:2px}
+  .tcard .d{font-size:11.5px;color:var(--muted);margin-top:1px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:6px}
+  .acard{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:16px;box-shadow:var(--shadow)}
+  .acard h3{font-size:16.5px;display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
+  .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+  .kv4{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin:12px 0}
+  .kv4 .k{font-size:12px;color:var(--muted)} .kv4 .v{font-size:17px;font-weight:700}
+  .bar{height:8px;border-radius:99px;background:var(--chip);overflow:hidden;margin:4px 0 2px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:99px}
+  .bar i.hot{background:linear-gradient(90deg,#f59e0b,#ef4444)}
+  .barlab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+  .err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;font-size:12.5px;margin-top:8px}
+  [data-theme="dark"] .err{background:#2a1420;color:#fda4af;border-color:#4c1d2e}
+  section.blk{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:16px;margin-top:12px;box-shadow:var(--shadow)}
+  section.blk h2{font-size:16px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{ text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:6px 8px;border-bottom:1px solid var(--line);word-break:break-all}
+  tr:last-child td{border-bottom:none}
+  .tag{display:inline-block;background:var(--chip);color:var(--accent);font-size:11px;font-weight:700;border-radius:99px;padding:1px 8px;margin-left:6px}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+  .cbar{display:flex;align-items:center;gap:8px;font-size:12.5px;margin:5px 0}
+  .cbar .n{width:86px;flex:none;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cbar .t{flex:1;height:9px;background:var(--chip);border-radius:99px;overflow:hidden}
+  .cbar .t i{display:block;height:100%;background:linear-gradient(90deg,#f59e0b,#f97316)}
+  .cbar .v{width:64px;text-align:right;font-weight:700;flex:none}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip2{background:var(--chip);border-radius:99px;padding:5px 12px;font-size:12.5px}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .mask{position:fixed;inset:0;background:rgba(8,10,25,.5);display:none;align-items:flex-start;justify-content:center;padding:22px 12px;z-index:60;overflow:auto}
+  .mask.open{display:flex}
+  .modal{background:var(--card);color:var(--text);border-radius:18px;width:100%;max-width:520px;padding:20px;box-shadow:0 24px 60px rgba(0,0,0,.3)}
+  .modal h3{font-size:17px;margin-bottom:6px}
+  .fld{margin:11px 0}
+  .fld label{display:block;font-size:13px;color:var(--muted);margin-bottom:5px}
+  .fld input,.fld select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--bg);color:var(--text);font-size:14.5px}
+  .btns{display:flex;gap:9px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+  .hint{font-size:12.5px;color:var(--muted);line-height:1.6}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:#111827;color:#fff;padding:10px 18px;border-radius:99px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:99;max-width:90vw;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%)}
+  .hero{background:var(--card);border:1px solid var(--line);border-radius:17px;padding:26px 20px;text-align:center;margin-top:14px;box-shadow:var(--shadow)}
+  .hero .big{font-size:19px;font-weight:800;margin-bottom:6px}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .backlink{color:var(--accent);cursor:pointer;font-size:14px;font-weight:600}
+  @media(max-width:640px){ .grid{grid-template-columns:1fr} h1{font-size:19px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">☁️</div>
+    <div>
+      <h1 id="panelName">YM CF 面板</h1>
+      <div class="sub" id="headSub">多账号 Cloudflare 用量与资源总览</div>
+    </div>
+    <div class="sp"></div>
+    <div class="seg" id="rangeSeg">
+      <button data-range="today" class="on">今日</button><button data-range="7d">7 天</button><button data-range="30d">30 天</button>
+    </div>
+    <button class="tbtn" id="refreshBtn" title="刷新">⟳</button>
+    <button class="tbtn" id="themeBtn" title="深浅色">◐</button>
+    <button class="btn ghost sm" id="adminBtn">登录</button>
+  </header>
+
+  <div id="publicBox"></div>
+  <div id="main"></div>
+</div>
+
+<!-- login / setup -->
+<div class="mask" id="mAuth"><div class="modal">
+  <h3 id="authTitle">管理员登录</h3>
+  <p class="hint" id="authHint"></p>
+  <div class="fld"><label>账号</label><input id="authUser" autocomplete="username"></div>
+  <div class="fld"><label id="authPwdLabel">密码</label><input id="authPwd" type="password" autocomplete="current-password"></div>
+  <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="authGo">登录</button></div>
+</div></div>
+
+<!-- accounts manager -->
+<div class="mask" id="mAccounts"><div class="modal">
+  <h3>Cloudflare 账号管理</h3>
+  <p class="hint">令牌只保存在你自己的 KV 里、只在服务端使用，页面上永不回显。添加时会自动验证令牌是否有效。</p>
+  <div id="acctList" style="margin-top:10px"></div>
+  <div class="btns"><button class="btn" id="acctAdd">＋ 添加账号</button><button class="btn ghost" data-close>关闭</button></div>
+</div></div>
+
+<!-- account editor -->
+<div class="mask" id="mAcctEdit"><div class="modal">
+  <h3 id="aeTitle">添加账号</h3>
+  <div class="fld"><label>账号名称（自己看的，随意）</label><input id="aeName" placeholder="如：主账号"></div>
+  <div class="fld"><label>Account ID（控制台首页右侧可复制，32 位）</label><input id="aeId" placeholder="32 位十六进制"></div>
+  <div class="fld"><label>API 令牌（需要 Analytics 读取权限，见仓库 README 的权限说明）</label><input id="aeToken" placeholder="粘贴 API Token；编辑时留空 = 不改"></div>
+  <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="aeSave">保存</button></div>
+</div></div>
+
+<!-- settings -->
+<div class="mask" id="mSettings"><div class="modal">
+  <h3>面板设置</h3>
+  <div class="fld"><label>面板名称</label><input id="setName"></div>
+  <div class="fld"><label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="setPublic" style="width:auto"> 未登录时公开今日汇总（只有总数，不含账号明细）</label></div>
+  <div class="fld"><label>修改管理员密码（留空不改；先填原密码）</label><input id="setOldPwd" type="password" placeholder="原密码"></div>
+  <div class="fld"><input id="setNewPwd" type="password" placeholder="新密码（至少 4 位）"></div>
+  <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="setSave">保存</button></div>
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const S = { authed: false, needsSetup: false, user: null, settings: {}, accounts: [], range: 'today', usage: {}, view: 'home', detailId: null };
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2400); }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function fmt(n) {
+  n = +n || 0;
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+function fmtBytes(b) {
+  b = +b || 0; const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return b.toFixed(i ? 2 : 0) + ' ' + u[i];
+}
+async function api(path, opts) {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+function open(id) { $(id).classList.add('open'); }
+function close(el) { el.closest('.mask').classList.remove('open'); }
+$$('[data-close]').forEach((b) => b.addEventListener('click', () => close(b)));
+$$('.mask').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m) m.classList.remove('open'); }));
+
+/* ---------- theme ---------- */
+function applyTheme() {
+  const t = localStorage.getItem('ymcfp_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+}
+$('#themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('ymcfp_theme', cur); applyTheme();
+});
+applyTheme();
+
+/* ---------- auth ---------- */
+function openAuth() {
+  $('#authTitle').textContent = S.needsSetup ? '首次设置管理员账号' : '管理员登录';
+  $('#authHint').textContent = S.needsSetup ? '这是新面板第一次使用，先给后台设个账号和密码，设完自动登录。' : '';
+  $('#authPwdLabel').textContent = S.needsSetup ? '设置密码（至少 4 位，记牢）' : '密码';
+  $('#authGo').textContent = S.needsSetup ? '设置并登录' : '登录';
+  open('#mAuth');
+}
+$('#authGo').addEventListener('click', async () => {
+  const user = $('#authUser').value.trim(), password = $('#authPwd').value;
+  if (!user || !password) { toast('账号和密码都要填'); return; }
+  try {
+    await api(S.needsSetup ? '/api/setup' : '/api/login', { method: 'POST', body: JSON.stringify({ user, password }) });
+    $('#mAuth').classList.remove('open');
+    toast(S.needsSetup ? '设置完成，已登录' : '登录成功');
+    await boot();
+  } catch (e) { toast(e.message); }
+});
+$('#adminBtn').addEventListener('click', async () => {
+  if (!S.authed) { openAuth(); return; }
+  openAccounts();
+});
+async function logout() { try { await api('/api/logout', { method: 'POST' }); } catch {} location.reload(); }
+
+/* ---------- accounts ---------- */
+function openAccounts() {
+  const box = $('#acctList');
+  box.innerHTML = S.accounts.length ? '' : '<p class="hint">还没有添加任何 Cloudflare 账号。</p>';
+  for (const a of S.accounts) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:9px 2px;border-bottom:1px solid var(--line)';
+    row.innerHTML = `<div style="flex:1;min-width:0"><b>${esc(a.name)}</b><div class="small muted">${esc(a.accountId)} · 令牌 ${esc(a.tokenMasked)}</div></div>`;
+    const eb = document.createElement('button'); eb.className = 'btn ghost sm'; eb.textContent = '编辑';
+    eb.addEventListener('click', () => openAcctEdit(a));
+    const db = document.createElement('button'); db.className = 'btn danger sm'; db.textContent = '删除';
+    db.addEventListener('click', async () => {
+      if (db.dataset.arm) { try { await api('/api/accounts?id=' + a.id, { method: 'DELETE' }); toast('已删除'); await boot(); openAccounts(); } catch (e) { toast(e.message); } }
+      else { db.dataset.arm = '1'; db.textContent = '再点一次确认删除'; setTimeout(() => { delete db.dataset.arm; db.textContent = '删除'; }, 3000); }
+    });
+    row.append(eb, db); box.append(row);
+  }
+  const foot = document.createElement('div');
+  foot.className = 'btns'; foot.style.justifyContent = 'flex-start';
+  foot.innerHTML = '<button class="btn ghost sm" id="setOpen">面板设置</button><button class="btn ghost sm" id="logoutBtn">退出登录</button>';
+  box.append(foot);
+  foot.querySelector('#setOpen').addEventListener('click', () => { $('#mAccounts').classList.remove('open'); openSettings(); });
+  foot.querySelector('#logoutBtn').addEventListener('click', logout);
+  open('#mAccounts');
+}
+let aeId = null;
+function openAcctEdit(a) {
+  aeId = a ? a.id : null;
+  $('#aeTitle').textContent = a ? '编辑账号' : '添加账号';
+  $('#aeName').value = a ? a.name : '';
+  $('#aeId').value = a ? a.accountId : '';
+  $('#aeToken').value = '';
+  open('#mAcctEdit');
+}
+$('#acctAdd').addEventListener('click', () => openAcctEdit(null));
+$('#aeSave').addEventListener('click', async () => {
+  const body = { name: $('#aeName').value, accountId: $('#aeId').value, token: $('#aeToken').value };
+  try {
+    if (aeId) await api('/api/accounts', { method: 'PUT', body: JSON.stringify({ id: aeId, ...body }) });
+    else await api('/api/accounts', { method: 'POST', body: JSON.stringify(body) });
+    $('#mAcctEdit').classList.remove('open');
+    toast('已保存');
+    await boot(); openAccounts();
+  } catch (e) { toast(e.message); }
+});
+
+/* ---------- settings ---------- */
+function openSettings() {
+  $('#setName').value = S.settings.panelName || '';
+  $('#setPublic').checked = !!S.settings.publicSummary;
+  $('#setOldPwd').value = ''; $('#setNewPwd').value = '';
+  open('#mSettings');
+}
+$('#setSave').addEventListener('click', async () => {
+  const body = { panelName: $('#setName').value, publicSummary: $('#setPublic').checked };
+  if ($('#setNewPwd').value) { body.oldPassword = $('#setOldPwd').value; body.newPassword = $('#setNewPwd').value; }
+  try {
+    const r = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
+    S.settings = r.settings; $('#panelName').textContent = r.settings.panelName;
+    $('#mSettings').classList.remove('open'); toast('已保存');
+  } catch (e) { toast(e.message); }
+});
+</script>
+<script>
+/* ---------- data + rendering ---------- */
+$('#rangeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-range]'); if (!b) return;
+  $$('#rangeSeg button').forEach((x) => x.classList.toggle('on', x === b));
+  S.range = b.dataset.range; S.view = 'home';
+  loadAll(false);
+});
+$('#refreshBtn').addEventListener('click', () => loadAll(true));
+
+async function fetchUsage(acct, fresh) {
+  const key = acct.id + ':' + S.range;
+  if (!fresh && S.usage[key]) return S.usage[key];
+  try {
+    const r = await api(`/api/usage?account=${acct.id}&range=${S.range}${fresh ? '&fresh=1' : ''}`);
+    S.usage[key] = { ok: true, ...r };
+  } catch (e) {
+    S.usage[key] = { ok: false, error: e.message };
+  }
+  return S.usage[key];
+}
+
+async function loadAll(fresh) {
+  if (!S.authed) { renderPublic(); return; }
+  const main = $('#main');
+  if (S.view === 'home') main.innerHTML = '<p class="hint" style="margin-top:16px"><span class="spin"></span> 正在从 Cloudflare 拉取各账号数据…</p>';
+  await Promise.all(S.accounts.map((a) => fetchUsage(a, fresh)));
+  if (S.view === 'detail' && S.detailId) renderDetail(S.detailId); else renderHome();
+}
+
+function sumTotals() {
+  const t = { workers: 0, errors: 0, kvR: 0, kvW: 0, d1R: 0, d1W: 0, r2: 0, http: 0, bytes: 0 };
+  for (const a of S.accounts) {
+    const u = S.usage[a.id + ':' + S.range];
+    if (!u || !u.ok) continue;
+    const d = u.usage;
+    if (d.workers.ok) { t.workers += d.workers.data.requests; t.errors += d.workers.data.errors; }
+    if (d.kv.ok) { t.kvR += d.kv.data.read; t.kvW += d.kv.data.write; }
+    if (d.d1.ok) { t.d1R += d.d1.data.rowsRead; t.d1W += d.d1.data.rowsWritten; }
+    if (d.r2.ok) { t.r2 += d.r2.data.classA + d.r2.data.classB; }
+    if (d.http.ok) { t.http += d.http.data.requests; t.bytes += d.http.data.bytes; }
+  }
+  return t;
+}
+
+function barHtml(label, used, quota) {
+  if (!quota) return '';
+  const pct = Math.min(100, (used / quota) * 100);
+  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmt(used)} / ${fmt(quota)}（${pct.toFixed(pct < 10 ? 1 : 0)}%）</span></div><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${pct}%"></i></div></div>`;
+}
+
+function bytesBarHtml(label, used, quota) {
+  if (!quota) return '';
+  const pct = Math.min(100, (used / quota) * 100);
+  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmtBytes(used)} / ${fmtBytes(quota)}（${pct.toFixed(1)}%）</span></div><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${pct}%"></i></div></div>`;
+}
+
+function quotaBars(u, detail) { // daily quotas — Workers section + home cards, today only
+  const q = u.quotas, d = u.usage, out = [];
+  if (u.usage.range !== 'today') return '';
+  if (d.workers.ok) out.push(barHtml('Workers 请求（每日免费额度）', d.workers.data.requests, q.workersDaily));
+  if (detail && d.kv.ok) {
+    out.push(barHtml('KV 读取（每日）', d.kv.data.read, q.kvReadsDaily));
+    out.push(barHtml('KV 写入（每日）', d.kv.data.write, q.kvWritesDaily));
+  } else if (d.kv.ok) out.push(barHtml('KV 读取（每日免费额度）', d.kv.data.read, q.kvReadsDaily));
+  if (detail && d.d1.ok) {
+    out.push(barHtml('D1 行读取（每日）', d.d1.data.rowsRead, q.d1RowsReadDaily));
+    out.push(barHtml('D1 行写入（每日）', d.d1.data.rowsWritten, q.d1RowsWrittenDaily));
+  }
+  return out.join('');
+}
+
+function r2Bars(u) { // R2 monthly quotas — 30d view only
+  const q = u.quotas, d = u.usage;
+  if (u.usage.range !== '30d' || !d.r2.ok) return '';
+  return barHtml('R2 A 类操作（近 30 天 / 每月免费额度）', d.r2.data.classA, q.r2ClassAMonthly)
+    + barHtml('R2 B 类操作（近 30 天 / 每月免费额度）', d.r2.data.classB, q.r2ClassBMonthly)
+    + bytesBarHtml('R2 存储（免费额度）', d.r2.data.storageBytes, q.r2StorageBytes);
+}
+
+function renderHome() {
+  const t = sumTotals();
+  const rangeName = { today: '今日', '7d': '近 7 天', '30d': '近 30 天' }[S.range];
+  let html = `<div class="totals">
+    <div class="tcard"><div class="k">Workers 请求（${rangeName}）</div><div class="v">${fmt(t.workers)}</div><div class="d">错误 ${fmt(t.errors)}</div></div>
+    <div class="tcard"><div class="k">KV 读 / 写</div><div class="v">${fmt(t.kvR)} / ${fmt(t.kvW)}</div><div class="d">${rangeName}合计</div></div>
+    <div class="tcard"><div class="k">D1 行读 / 写</div><div class="v">${fmt(t.d1R)} / ${fmt(t.d1W)}</div><div class="d">${rangeName}合计</div></div>
+    <div class="tcard"><div class="k">R2 操作</div><div class="v">${fmt(t.r2)}</div><div class="d">A 类 + B 类</div></div>
+    <div class="tcard"><div class="k">站点流量</div><div class="v">${fmt(t.http)}</div><div class="d">请求 · ${fmtBytes(t.bytes)}</div></div>
+  </div>`;
+  if (!S.accounts.length) {
+    html += `<div class="hero"><div class="big">还没有添加 Cloudflare 账号</div><p class="hint">点右上角「账号管理」添加第一个账号：填名称、Account ID 和一个只读 API 令牌即可。<br>令牌需要开哪些权限，仓库 README 里有图文说明。</p><div style="margin-top:14px"><button class="btn" onclick="openAccounts()">去添加账号</button></div></div>`;
+  }
+  html += '<div class="grid">';
+  for (const a of S.accounts) {
+    const u = S.usage[a.id + ':' + S.range];
+    if (!u) { html += `<div class="acard"><h3>${esc(a.name)}</h3><p class="hint">加载中…</p></div>`; continue; }
+    if (!u.ok) { html += `<div class="acard"><h3><span class="dot bad"></span>${esc(a.name)}</h3><div class="err">拉取失败：${esc(u.error)}</div></div>`; continue; }
+    const d = u.usage;
+    const badSecs = ['workers', 'kv', 'd1', 'r2'].filter((k) => !d[k].ok);
+    const w = d.workers.ok ? d.workers.data : { requests: 0, errors: 0, pagesRequests: 0 };
+    const kvv = d.kv.ok ? d.kv.data : { read: 0, write: 0 };
+    const dd = d.d1.ok ? d.d1.data : { rowsRead: 0, rowsWritten: 0 };
+    const rr = d.r2.ok ? d.r2.data : { classA: 0, classB: 0 };
+    html += `<div class="acard">
+      <h3><span class="dot ${badSecs.length ? 'warn' : ''}"></span>${esc(a.name)}</h3>
+      <div class="kv4">
+        <div><div class="k">Workers 请求</div><div class="v">${fmt(w.requests)}</div></div>
+        <div><div class="k">其中 Pages 函数</div><div class="v">${fmt(w.pagesRequests)}</div></div>
+        <div><div class="k">KV 读 / 写</div><div class="v">${fmt(kvv.read)} / ${fmt(kvv.write)}</div></div>
+        <div><div class="k">D1 行读 / 写</div><div class="v">${fmt(dd.rowsRead)} / ${fmt(dd.rowsWritten)}</div></div>
+        <div><div class="k">R2 操作 A / B</div><div class="v">${fmt(rr.classA)} / ${fmt(rr.classB)}</div></div>
+        <div><div class="k">错误</div><div class="v">${fmt(w.errors)}</div></div>
+      </div>
+      ${quotaBars(u, false)}
+      ${badSecs.length ? `<div class="err">部分数据没拉到：${badSecs.join('、')}（多半是令牌缺对应权限，进详情看具体原因）</div>` : ''}
+      <div class="btns" style="justify-content:flex-start"><button class="btn sm" data-detail="${a.id}">查看详情</button></div>
+    </div>`;
+  }
+  html += '</div>';
+  $('#main').innerHTML = html;
+  $$('#main [data-detail]').forEach((b) => b.addEventListener('click', () => { S.view = 'detail'; S.detailId = b.dataset.detail; renderDetail(b.dataset.detail); scrollTo({ top: 0 }); }));
+}
+
+function sparkline(trend) {
+  if (!trend || trend.length < 2) return '<p class="hint">暂无趋势数据</p>';
+  const max = Math.max(...trend.map((p) => p.requests), 1);
+  const W = 640, H = 90;
+  const pts = trend.map((p, i) => `${(i / (trend.length - 1)) * W},${H - 6 - (p.requests / max) * (H - 16)}`).join(' ');
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:90px" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.5"/></svg>
+  <div class="barlab"><span>${esc(trend[0].label)}</span><span>峰值 ${fmt(max)}</span><span>${esc(trend[trend.length - 1].label)}</span></div>`;
+}
+
+function tableHtml(headers, rows) {
+  if (!rows.length) return '<p class="hint">暂无数据</p>';
+  return `<div style="overflow-x:auto"><table><tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>${rows.join('')}</table></div>`;
+}
+
+function renderDetail(id) {
+  const a = S.accounts.find((x) => x.id === id);
+  const u = S.usage[id + ':' + S.range];
+  if (!a || !u) { S.view = 'home'; renderHome(); return; }
+  if (!u.ok) { $('#main').innerHTML = `<p style="margin:14px 0"><span class="backlink" id="bk">← 返回总览</span></p><div class="err">拉取失败：${esc(u.error)}</div>`; $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); }); return; }
+  const d = u.usage, inv = d.inventory.ok ? d.inventory.data : {};
+  let html = `<p style="margin:14px 0 4px"><span class="backlink" id="bk">← 返回总览</span></p>
+  <h2 style="font-size:20px">${esc(a.name)} <span class="small muted">${esc(a.accountId)}</span></h2>`;
+
+  // Workers
+  html += '<section class="blk"><h2>⚡ Workers 与 Pages 函数</h2>';
+  if (d.workers.ok) {
+    const w = d.workers.data;
+    html += `<div class="kv4" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+      <div><div class="k">总请求</div><div class="v">${fmt(w.requests)}</div></div>
+      <div><div class="k">错误</div><div class="v">${fmt(w.errors)}</div></div>
+      <div><div class="k">子请求</div><div class="v">${fmt(w.subrequests)}</div></div>
+      <div><div class="k">Pages 函数请求</div><div class="v">${fmt(w.pagesRequests)}</div></div></div>
+      ${sparkline(w.trend)}
+      ${tableHtml(['脚本', '请求', '错误', 'CPU P99'], w.scripts.map((s) => `<tr><td>${esc(s.name)}${s.pages ? '<span class="tag">Pages</span>' : ''}</td><td>${fmt(s.requests)}</td><td>${fmt(s.errors)}</td><td>${s.cpuP99 ? s.cpuP99.toFixed(1) + ' ms' : '—'}</td></tr>`))}
+      ${quotaBars(u, true)}`;
+  } else html += `<div class="err">${esc(d.workers.error)}</div>`;
+  html += '</section>';
+
+  // HTTP traffic
+  html += '<section class="blk"><h2>🌐 站点流量（名下域名）</h2>';
+  if (d.http.ok) {
+    const h = d.http.data, maxC = Math.max(...h.topCountries.map((c) => c.requests), 1);
+    html += `<div class="kv4" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+      <div><div class="k">总请求</div><div class="v">${fmt(h.requests)}</div></div>
+      <div><div class="k">总流量</div><div class="v">${fmtBytes(h.bytes)}</div></div></div>
+      ${h.topCountries.map((c) => `<div class="cbar"><span class="n">${esc(c.name)}</span><span class="t"><i style="width:${(c.requests / maxC) * 100}%"></i></span><span class="v">${fmt(c.requests)}</span></div>`).join('') || '<p class="hint">暂无流量数据</p>'}`;
+  } else html += `<div class="err">${esc(d.http.error || '该账号名下没有域名，或令牌缺 Analytics 权限')}</div>`;
+  html += '</section>';
+
+  // KV + D1 side by side
+  html += '<div class="cols">';
+  html += '<section class="blk"><h2>🗄️ Workers KV</h2>';
+  if (d.kv.ok) {
+    const k = d.kv.data;
+    html += `<div class="kv4"><div><div class="k">读</div><div class="v">${fmt(k.read)}</div></div><div><div class="k">写</div><div class="v">${fmt(k.write)}</div></div><div><div class="k">删</div><div class="v">${fmt(k.delete)}</div></div><div><div class="k">列</div><div class="v">${fmt(k.list)}</div></div></div>`;
+    const names = {}; for (const ns of inv.kvNamespaces || []) names[ns.id] = ns.title;
+    html += tableHtml(['命名空间', '读', '写', '合计'], k.namespaces.map((n) => `<tr><td>${esc(names[n.namespaceId] || n.namespaceId)}</td><td>${fmt(n.read)}</td><td>${fmt(n.write)}</td><td>${fmt(n.total)}</td></tr>`));
+  } else html += `<div class="err">${esc(d.kv.error)}</div>`;
+  html += '</section>';
+
+  html += '<section class="blk"><h2>🛢️ D1 数据库</h2>';
+  if (d.d1.ok) {
+    const dd = d.d1.data;
+    html += `<div class="kv4"><div><div class="k">行读取</div><div class="v">${fmt(dd.rowsRead)}</div></div><div><div class="k">行写入</div><div class="v">${fmt(dd.rowsWritten)}</div></div><div><div class="k">读查询</div><div class="v">${fmt(dd.readQueries)}</div></div><div><div class="k">写查询</div><div class="v">${fmt(dd.writeQueries)}</div></div></div>`;
+    const names = {}; let storage = 0; for (const db of inv.databases || []) { names[db.id] = db.name; storage += db.fileSize || 0; }
+    html += tableHtml(['数据库', '行读', '行写'], dd.databases.map((x) => `<tr><td>${esc(names[x.databaseId] || x.databaseId)}</td><td>${fmt(x.rowsRead)}</td><td>${fmt(x.rowsWritten)}</td></tr>`));
+    html += bytesBarHtml('D1 总存储（免费额度）', storage, u.quotas.d1StorageBytes);
+  } else html += `<div class="err">${esc(d.d1.error)}</div>`;
+  html += '</section></div>';
+
+  // R2
+  html += '<section class="blk"><h2>📦 R2 对象存储</h2>';
+  if (d.r2.ok) {
+    const r = d.r2.data;
+    html += `<div class="kv4" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+      <div><div class="k">A 类操作</div><div class="v">${fmt(r.classA)}</div></div>
+      <div><div class="k">B 类操作</div><div class="v">${fmt(r.classB)}</div></div>
+      <div><div class="k">存储量</div><div class="v">${fmtBytes(r.storageBytes)}</div></div></div>
+      ${tableHtml(['存储桶', 'A 类', 'B 类', '存储'], r.buckets.map((b) => `<tr><td>${esc(b.bucket)}</td><td>${fmt(b.classA)}</td><td>${fmt(b.classB)}</td><td>${fmtBytes(b.storageBytes)}</td></tr>`))}
+      ${r2Bars(u)}`;
+  } else html += `<div class="err">${esc(d.r2.error)}</div>`;
+  html += '</section>';
+
+  // Inventory
+  html += '<section class="blk"><h2>🧰 资源清单</h2>';
+  if (d.inventory.ok) {
+    const grp = (label, items) => items && items.length ? `<div style="margin:8px 0"><div class="small muted" style="margin-bottom:5px">${label}（${items.length}）</div><div class="chips">${items.map((x) => `<span class="chip2">${esc(x)}</span>`).join('')}</div></div>` : '';
+    html += grp('域名 Zones', (inv.zones || []).map((z) => z.name));
+    html += grp('Workers 脚本', (inv.scripts || []).map((s) => s.name));
+    html += grp('Pages 项目', (inv.projects || []).map((p) => p.name));
+    html += grp('D1 数据库', (inv.databases || []).map((x) => x.name));
+    html += grp('KV 命名空间', (inv.kvNamespaces || []).map((k) => k.title));
+    html += grp('R2 存储桶', (inv.buckets || []).map((b) => b.name));
+    if (!html.includes('chip2')) html += '<p class="hint">没拉到资源清单（令牌可能只有 Analytics 权限；补上各资源的 Read 权限后这里会显示）。</p>';
+  } else html += `<div class="err">${esc(d.inventory.error)}</div>`;
+  html += '</section>';
+
+  $('#main').innerHTML = html;
+  $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); });
+}
+
+/* ---------- public + boot ---------- */
+async function renderPublic() {
+  try {
+    const p = await api('/api/public');
+    if (!p.enabled) { $('#publicBox').innerHTML = ''; $('#main').innerHTML = `<div class="hero"><div class="big">${esc(S.settings.panelName || 'YM CF 面板')}</div><p class="hint">多账号 Cloudflare 用量与资源总览面板。登录后添加你的 Cloudflare 账号即可使用。</p><div style="margin-top:14px"><button class="btn" onclick="openAuth()">${S.needsSetup ? '设置管理员账号' : '管理员登录'}</button></div></div>`; return; }
+    const t = p.totals;
+    $('#publicBox').innerHTML = `<div class="totals">
+      <div class="tcard"><div class="k">监控账号</div><div class="v">${t.accounts}</div><div class="d">今日汇总</div></div>
+      <div class="tcard"><div class="k">Workers 请求（今日）</div><div class="v">${fmt(t.workersRequests)}</div><div class="d">错误 ${fmt(t.workersErrors)}</div></div>
+      <div class="tcard"><div class="k">KV 读 / 写</div><div class="v">${fmt(t.kvReads)} / ${fmt(t.kvWrites)}</div><div class="d">今日</div></div>
+      <div class="tcard"><div class="k">D1 行读 / 写</div><div class="v">${fmt(t.d1RowsRead)} / ${fmt(t.d1RowsWritten)}</div><div class="d">今日</div></div>
+      <div class="tcard"><div class="k">站点请求（今日）</div><div class="v">${fmt(t.httpRequests)}</div><div class="d">${fmtBytes(t.httpBytes)}</div></div></div>`;
+    $('#main').innerHTML = '';
+  } catch { $('#main').innerHTML = ''; }
+}
+
+async function boot() {
+  const st = await api('/api/state');
+  S.needsSetup = st.needsSetup; S.authed = st.authed; S.user = st.user || null;
+  S.settings = st.settings || {}; S.accounts = st.accounts || [];
+  $('#panelName').textContent = S.settings.panelName || 'YM CF 面板';
+  document.title = S.settings.panelName || 'YM CF 面板';
+  $('#adminBtn').textContent = S.authed ? '账号管理' : (S.needsSetup ? '设置管理员' : '登录');
+  if (S.authed) loadAll(false); else renderPublic();
+}
+boot().catch((e) => { $('#main').innerHTML = `<div class="err" style="margin-top:14px">初始化失败：${esc(e.message)}（多半是还没绑定 PANEL_KV 或绑定名不对）</div>`; });
+</script>
+</body>
+</html>

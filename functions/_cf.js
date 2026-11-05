@@ -96,6 +96,18 @@ const Q_ZONE_HTTP = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(f
   httpRequestsAdaptiveGroups(limit: 1000, filter: {datetime_geq: $s, datetime_leq: $e}) {
     count sum { edgeResponseBytes } dimensions { clientCountryName } }
 } } }`;
+const Q_ZONE_STATUS = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
+  httpRequestsAdaptiveGroups(limit: 30, filter: {datetime_geq: $s, datetime_leq: $e}, orderBy: [count_DESC]) {
+    count dimensions { responseStatus } }
+} } }`;
+const Q_ZONE_PATHS = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
+  httpRequestsAdaptiveGroups(limit: 10, filter: {datetime_geq: $s, datetime_leq: $e}, orderBy: [count_DESC]) {
+    count dimensions { clientRequestPath } }
+} } }`;
+const Q_ZONE_CACHE = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
+  httpRequestsAdaptiveGroups(limit: 30, filter: {datetime_geq: $s, datetime_leq: $e}) {
+    count dimensions { cacheStatus } }
+} } }`;
 
 export async function verifyToken(account) {
   const data = await cfFetch(account, '/user/tokens/verify');
@@ -230,11 +242,34 @@ export async function getUsage(account, range) {
         } catch (e) { if (!firstError) firstError = e; }
       }
       if (!okZones && firstError) throw firstError;
-      return {
+      const out = {
         requests, bytes,
         topCountries: Object.entries(countries).map(([name, requests]) => ({ name, requests }))
           .sort((x, y) => y.requests - x.requests).slice(0, 8),
       };
+      // v3 extras (best-effort, same Zone Analytics Read permission)
+      try {
+        const statusMap = {}, pathMap = {};
+        let cacheHit = 0, cacheTot = 0;
+        for (const z of inv.data.zones.slice(0, 5)) {
+          const v = { z: z.id, s: w.startISO, e: w.endISO };
+          const [qs, qp, qc] = await Promise.allSettled([gql(account, Q_ZONE_STATUS, v), gql(account, Q_ZONE_PATHS, v), gql(account, Q_ZONE_CACHE, v)]);
+          if (qs.status === 'fulfilled') for (const row of (((qs.value.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [])) {
+            const c = row.dimensions.responseStatus; if (c) statusMap[c] = (statusMap[c] || 0) + (row.count || 0);
+          }
+          if (qp.status === 'fulfilled') for (const row of (((qp.value.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [])) {
+            const p = row.dimensions.clientRequestPath || '/'; pathMap[p] = (pathMap[p] || 0) + (row.count || 0);
+          }
+          if (qc.status === 'fulfilled') for (const row of (((qc.value.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [])) {
+            const n = row.count || 0; cacheTot += n;
+            if (['hit', 'stale', 'updating', 'revalidated'].includes(String(row.dimensions.cacheStatus || '').toLowerCase())) cacheHit += n;
+          }
+        }
+        out.statusCodes = Object.entries(statusMap).map(([code, requests]) => ({ code: Number(code), requests })).sort((a, b) => b.requests - a.requests).slice(0, 10);
+        out.topPaths = Object.entries(pathMap).map(([path, requests]) => ({ path, requests })).sort((a, b) => b.requests - a.requests).slice(0, 8);
+        out.cacheHitPct = cacheTot > 0 ? Math.round((cacheHit / cacheTot) * 1000) / 10 : null;
+      } catch { /* extras are optional */ }
+      return out;
     });
   }
 

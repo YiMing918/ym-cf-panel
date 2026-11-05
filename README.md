@@ -77,6 +77,7 @@ npx wrangler pages deploy . --project-name ym-cf-panel
 | --- | --- | --- |
 | 用量与流量分析（**必需**） | **Account → Analytics → Read** | Workers/Pages/KV/D1/R2 用量、域名流量都靠它 |
 | 域名清单（可选） | Zone → Zone → Read | 显示名下域名列表 |
+| 域名流量（可选） | Zone → Analytics → Read | 显示各域名的请求量、流量与来源国家 |
 | Workers 清单（可选） | Account → Workers Scripts → Read | 显示脚本列表 |
 | Pages 清单（可选） | Account → Cloudflare Pages → Read | 显示 Pages 项目列表 |
 | D1 清单（可选） | Account → D1 → Read | 显示数据库名与体积 |

@@ -45,6 +45,7 @@
   .bar{height:8px;border-radius:99px;background:var(--chip);overflow:hidden;margin:4px 0 2px}
   .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:99px}
   .bar i.hot{background:linear-gradient(90deg,#f59e0b,#ef4444)}
+  .bar i.warm{background:linear-gradient(90deg,#fbbf24,#f59e0b)}
   .barlab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
   .err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:8px 10px;font-size:12.5px;margin-top:8px}
   [data-theme="dark"] .err{background:#2a1420;color:#fda4af;border-color:#4c1d2e}
@@ -124,7 +125,8 @@
   <h3>Cloudflare 账号管理</h3>
   <p class="hint">令牌只保存在你自己的 KV 里、只在服务端使用，页面上永不回显。添加时会自动验证令牌是否有效。</p>
   <div id="acctList" style="margin-top:10px"></div>
-  <div class="btns"><button class="btn" id="acctAdd">＋ 添加账号</button><button class="btn ghost" data-close>关闭</button></div>
+  <div id="healthOut" style="margin-top:8px"></div>
+  <div class="btns"><button class="btn" id="acctAdd">＋ 添加账号</button><button class="btn ghost" id="healthBtn">🩺 令牌自检</button><button class="btn ghost" data-close>关闭</button></div>
 </div></div>
 
 <!-- account editor -->
@@ -143,6 +145,8 @@
   <div class="fld"><label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="setPublic" style="width:auto"> 未登录时公开今日汇总（只有总数，不含账号明细）</label></div>
   <div class="fld"><label>修改管理员密码（留空不改；先填原密码）</label><input id="setOldPwd" type="password" placeholder="原密码"></div>
   <div class="fld"><input id="setNewPwd" type="password" placeholder="新密码（至少 4 位）"></div>
+  <div class="fld"><label>界面主题（保存在这台设备上）</label><select id="setTheme"><option value="light">浅色</option><option value="dark">深色</option><option value="auto">跟随系统</option></select></div>
+  <p class="hint">YM CF 面板 v3.0</p>
   <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="setSave">保存</button></div>
 </div></div>
 
@@ -321,16 +325,17 @@ function sumTotals() {
   return t;
 }
 
+function barCls(pct) { return pct >= 85 ? 'hot' : pct >= 65 ? 'warm' : ''; }
 function barHtml(label, used, quota) {
   if (!quota) return '';
   const pct = Math.min(100, (used / quota) * 100);
-  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmt(used)} / ${fmt(quota)}（${pct.toFixed(pct < 10 ? 1 : 0)}%）</span></div><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${pct}%"></i></div></div>`;
+  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmt(used)} / ${fmt(quota)}（${pct.toFixed(pct < 10 ? 1 : 0)}%）</span></div><div class="bar"><i class="${barCls(pct)}" style="width:${pct}%"></i></div></div>`;
 }
 
 function bytesBarHtml(label, used, quota) {
   if (!quota) return '';
   const pct = Math.min(100, (used / quota) * 100);
-  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmtBytes(used)} / ${fmtBytes(quota)}（${pct.toFixed(1)}%）</span></div><div class="bar"><i class="${pct >= 85 ? 'hot' : ''}" style="width:${pct}%"></i></div></div>`;
+  return `<div style="margin-top:8px"><div class="barlab"><span>${esc(label)}</span><span>${fmtBytes(used)} / ${fmtBytes(quota)}（${pct.toFixed(1)}%）</span></div><div class="bar"><i class="${barCls(pct)}" style="width:${pct}%"></i></div></div>`;
 }
 
 function quotaBars(u, detail) { // daily quotas — Workers section + home cards, today only
@@ -420,8 +425,16 @@ function renderDetail(id) {
   if (!a || !u) { S.view = 'home'; renderHome(); return; }
   if (!u.ok) { $('#main').innerHTML = `<p style="margin:14px 0"><span class="backlink" id="bk">← 返回总览</span></p><div class="err">拉取失败：${esc(u.error)}</div>`; $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); }); return; }
   const d = u.usage, inv = d.inventory.ok ? d.inventory.data : {};
-  let html = `<p style="margin:14px 0 4px"><span class="backlink" id="bk">← 返回总览</span></p>
-  <h2 style="font-size:20px">${esc(a.name)} <span class="small muted">${esc(a.accountId)}</span></h2>`;
+  // Spike check: last trend point vs the average of the previous points
+  let spike = '';
+  const tr = d.workers && d.workers.ok ? d.workers.data.trend : null;
+  if (tr && tr.length >= 4) {
+    const last = tr[tr.length - 1].requests, prev = tr.slice(0, -1);
+    const avg = prev.reduce((s, p) => s + p.requests, 0) / prev.length;
+    if (avg > 0 && last >= avg * 2 && last >= 100) spike = ' <span class="tag" title="最近一期请求量达到此前平均的 2 倍以上">⚡ 用量突刺</span>';
+  }
+  let html = `<p style="margin:14px 0 4px"><span class="backlink" id="bk">← 返回总览</span> <button class="btn ghost sm" id="expBtn" style="float:right">⬇ 导出报告</button></p>
+  <h2 style="font-size:20px">${esc(a.name)} <span class="small muted">${esc(a.accountId)}</span>${spike}</h2>`;
 
   // Workers
   html += '<section class="blk"><h2>⚡ Workers 与 Pages 函数</h2>';
@@ -446,6 +459,12 @@ function renderDetail(id) {
       <div><div class="k">总请求</div><div class="v">${fmt(h.requests)}</div></div>
       <div><div class="k">总流量</div><div class="v">${fmtBytes(h.bytes)}</div></div></div>
       ${h.topCountries.map((c) => `<div class="cbar"><span class="n">${esc(c.name)}</span><span class="t"><i style="width:${(c.requests / maxC) * 100}%"></i></span><span class="v">${fmt(c.requests)}</span></div>`).join('') || '<p class="hint">暂无流量数据</p>'}`;
+    if (h.cacheHitPct !== null && h.cacheHitPct !== undefined) html += `<p class="hint" style="margin-top:8px">缓存命中率 <b style="color:var(--text)">${h.cacheHitPct}%</b>（命中/过期/更新中的请求占比）</p>`;
+    if (h.statusCodes && h.statusCodes.length) html += `<div style="margin-top:6px"><b>状态码分布</b><div class="chips" style="margin-top:6px">${h.statusCodes.map((s) => `<span class="chip2">${s.code} · ${fmt(s.requests)}</span>`).join('')}</div></div>`;
+    if (h.topPaths && h.topPaths.length) {
+      const maxP = Math.max(...h.topPaths.map((p) => p.requests), 1);
+      html += `<div style="margin-top:10px"><b>热门路径</b>${h.topPaths.map((p) => `<div class="cbar"><span class="n" style="min-width:180px;word-break:break-all">${esc(p.path)}</span><span class="t"><i style="width:${(p.requests / maxP) * 100}%"></i></span><span class="v">${fmt(p.requests)}</span></div>`).join('')}</div>`;
+    }
   } else html += `<div class="err">${esc(d.http.error || '该账号名下没有域名，或令牌缺 Analytics 权限')}</div>`;
   html += '</section>';
 
@@ -501,12 +520,21 @@ function renderDetail(id) {
   html += `<section class="blk"><h2>🛠️ 管理（可操作）</h2>
   <p class="hint" style="margin-bottom:10px">以下操作会真实修改你的 Cloudflare 账号，需要令牌带对应的编辑权限；缺权限时对应功能会报错提示。</p>
   <div class="seg" id="mTabs">
-    <button data-mtab="dns" class="on">DNS 记录</button><button data-mtab="domain">域名</button><button data-mtab="kv">KV 数据</button><button data-mtab="d1">D1 控制台</button><button data-mtab="deploy">部署</button><button data-mtab="purge">清缓存</button>
+    <button data-mtab="dns" class="on">DNS 记录</button><button data-mtab="domain">域名</button><button data-mtab="zoneset">域名设置</button><button data-mtab="rules">规则</button><button data-mtab="email">邮件转发</button><button data-mtab="kv">KV 数据</button><button data-mtab="d1">D1 控制台</button><button data-mtab="deploy">部署</button><button data-mtab="tunnel">隧道</button><button data-mtab="purge">清缓存</button>
   </div>
   <div id="mBody" style="margin-top:12px"></div></section>`;
 
   $('#main').innerHTML = html;
   $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); });
+  const expBtn = $('#expBtn');
+  if (expBtn) expBtn.addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify({ account: a.name, accountId: a.accountId, exportedAt: new Date().toISOString(), usage: d }, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `cf-report-${a.accountId.slice(0, 8)}-${S.range}.json`;
+    link.click(); URL.revokeObjectURL(link.href);
+    toast('报告已导出');
+  });
   initManage(a, inv);
 }
 
@@ -563,7 +591,7 @@ function initManage(acct, inv) {
   loadMTab();
 }
 function loadMTab() {
-  ({ dns: loadDns, domain: loadDomain, kv: loadKv, d1: loadD1, deploy: loadDeploy, purge: loadPurge })[M.tab]();
+  ({ dns: loadDns, domain: loadDomain, zoneset: loadZoneset, rules: loadRules, email: loadEmail, kv: loadKv, d1: loadD1, deploy: loadDeploy, tunnel: loadTunnel, purge: loadPurge })[M.tab]();
 }
 const zoneSel = (id) => selHtml(id, (M.inv.zones || []).map((z) => ({ value: z.id, name: z.name })), M.zone, (x) => x.name);
 const noRes = (what) => `<p class="hint">这个账号没有${what}（或令牌缺对应读取权限）。</p>`;
@@ -586,6 +614,35 @@ async function loadDns() {
   $('#dnsZone').addEventListener('change', (e) => { M.zone = e.target.value; M.dnsEdit = null; loadDns(); });
   $('#dnsSave').addEventListener('click', saveDns);
   $('#dnsCancel').addEventListener('click', () => { M.dnsEdit = null; loadDns(); });
+  // v3: presets + import/export
+  body.insertAdjacentHTML('beforeend', `<div style="margin-top:16px"><b>常用预设（一键填入表单，确认后再保存）</b>
+  <div class="btns" style="justify-content:flex-start">
+    <button class="btn ghost sm" id="psSpf">📧 SPF（只允许本站发信）</button>
+    <button class="btn ghost sm" id="psDmarc">📧 DMARC（防伪造）</button>
+    <button class="btn ghost sm" id="psWww">🌐 www 跳主域名目标</button>
+  </div>
+  <b>导入 / 导出（BIND 区域文件格式）</b>
+  <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="dnsExport">⬇ 导出全部记录</button></div>
+  <label class="mlab">导入内容（粘贴 BIND 格式文本）</label><textarea class="minput" id="dnsImportTxt" rows="4" placeholder="www 300 IN A 192.0.2.1"></textarea>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="dnsImportBtn">导入记录</button></div></div>`);
+  const fillForm = (type, name, content) => { $('#dnsType').value = type; $('#dnsName').value = name; $('#dnsContent').value = content; $('#dnsTtl').value = 1; toast('已填入表单，检查后点「保存记录」'); };
+  $('#psSpf').addEventListener('click', () => fillForm('TXT', '@', 'v=spf1 -all'));
+  $('#psDmarc').addEventListener('click', () => fillForm('TXT', '_dmarc', 'v=DMARC1; p=none;'));
+  $('#psWww').addEventListener('click', () => { const z = (M.inv.zones.find((x) => x.id === M.zone) || {}).name || ''; fillForm('CNAME', 'www', z); });
+  $('#dnsExport').addEventListener('click', async () => {
+    try {
+      const r = await api(`/api/dnsio?account=${M.acct.id}&zone=${M.zone}`);
+      const blob = new Blob([r.text], { type: 'text/plain' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = 'dns-export.txt'; link.click(); URL.revokeObjectURL(link.href);
+    } catch (e) { toast(e.message); }
+  });
+  $('#dnsImportBtn').addEventListener('click', (e) => arm(e.target, async () => {
+    try {
+      const r = await api('/api/dnsio', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, content: $('#dnsImportTxt').value }) });
+      toast(`导入完成：新增 ${r.added ?? '?'} 条`); refreshDnsList();
+    } catch (err) { toast(err.message); }
+  }));
   await refreshDnsList();
 }
 async function refreshDnsList() {
@@ -676,6 +733,25 @@ async function loadKv() {
   $('#kvNs').addEventListener('change', (e) => { M.ns = e.target.value; loadKv(); });
   $('#kvSearch').addEventListener('click', () => refreshKvList(true));
   $('#kvNew').addEventListener('click', () => openKvEditor('', '', true));
+  // v3: namespace management
+  body.insertAdjacentHTML('beforeend', `<div style="margin-top:16px"><b>命名空间管理</b>
+  <div class="mrow"><div><label class="mlab">新建命名空间名称</label><input class="minput" id="nsNewName" placeholder="如 my-data"></div>
+  <div><button class="btn sm" id="nsCreate">新建</button></div>
+  <div><label class="mlab">当前命名空间改名</label><input class="minput" id="nsRenameTo" placeholder="新名称"></div>
+  <div><button class="btn ghost sm" id="nsRename">改名</button> <button class="btn danger sm" id="nsDelete">删除当前命名空间</button></div></div>
+  <p class="hint">删除命名空间会连同里面所有键一起删掉，不可恢复。</p></div>`);
+  $('#nsCreate').addEventListener('click', async () => {
+    try { await api('/api/kvns', { method: 'POST', body: JSON.stringify({ account: M.acct.id, title: $('#nsNewName').value }) }); toast('已新建，刷新详情后出现在列表里'); }
+    catch (e) { toast(e.message); }
+  });
+  $('#nsRename').addEventListener('click', async () => {
+    try { await api('/api/kvns', { method: 'PUT', body: JSON.stringify({ account: M.acct.id, ns: M.ns, title: $('#nsRenameTo').value }) }); toast('已改名（刷新详情生效）'); }
+    catch (e) { toast(e.message); }
+  });
+  $('#nsDelete').addEventListener('click', (e) => arm(e.target, async () => {
+    try { await api(`/api/kvns?account=${M.acct.id}&ns=${M.ns}`, { method: 'DELETE' }); toast('命名空间已删除（刷新详情生效）'); }
+    catch (err) { toast(err.message); }
+  }));
   refreshKvList(true);
 }
 async function refreshKvList(reset) {
@@ -723,6 +799,27 @@ async function loadD1() {
   <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="sqlRun">执行</button></div>
   <div id="sqlOut" style="margin-top:10px"></div>`;
   $('#d1Db').addEventListener('change', (e) => { M.db = e.target.value; loadD1(); });
+  // v3: database admin (create / export / delete)
+  body.insertAdjacentHTML('beforeend', `<div style="margin-top:16px"><b>数据库管理</b>
+  <div class="mrow"><div><label class="mlab">新建数据库名</label><input class="minput" id="dbNewName" placeholder="如 my-db"></div>
+  <div><button class="btn sm" id="dbCreate">新建数据库</button></div>
+  <div><button class="btn ghost sm" id="dbExport">⬇ 导出当前库（SQL）</button> <button class="btn danger sm" id="dbDelete">删除当前数据库</button></div></div>
+  <p class="hint">导出会生成一个临时下载链接；删除数据库不可恢复。</p></div>`);
+  $('#dbCreate').addEventListener('click', async () => {
+    try { await api('/api/d1admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, action: 'create', name: $('#dbNewName').value }) }); toast('已新建（刷新详情后出现在列表里）'); }
+    catch (e) { toast(e.message); }
+  });
+  $('#dbExport').addEventListener('click', async () => {
+    try {
+      const r = await api('/api/d1admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, action: 'export', db: M.db }) });
+      if (r.url) { const link = document.createElement('a'); link.href = r.url; link.target = '_blank'; link.rel = 'noopener'; link.click(); toast('导出链接已打开'); }
+      else toast(r.note || '导出生成中，稍后再试');
+    } catch (e) { toast(e.message); }
+  });
+  $('#dbDelete').addEventListener('click', (e) => arm(e.target, async () => {
+    try { await api(`/api/d1admin?account=${M.acct.id}&db=${M.db}`, { method: 'DELETE' }); toast('数据库已删除（刷新详情生效）'); }
+    catch (err) { toast(err.message); }
+  }));
   $('#sqlRun').addEventListener('click', async () => {
     const out = $('#sqlOut'); out.innerHTML = '<p class="hint"><span class="spin"></span> 执行中…</p>';
     try {
@@ -746,8 +843,57 @@ async function loadDeploy() {
   if (M.project) html += `<b>Pages 项目部署</b><div class="mrow"><div><label class="mlab">项目</label>${selHtml('depProject', (M.inv.projects || []).map((p) => ({ value: p.name, name: p.name })), M.project, (x) => x.name)}</div></div><div id="depList"><p class="hint"><span class="spin"></span> 加载部署…</p></div>`;
   if (M.script) html += `<div style="margin-top:18px"><b>Workers 版本与部署</b><div class="mrow"><div><label class="mlab">脚本</label>${selHtml('depScript', (M.inv.scripts || []).map((s) => ({ value: s.name, name: s.name })), M.script, (x) => x.name)}</div></div><div id="wList"><p class="hint"><span class="spin"></span> 加载版本…</p></div></div>`;
   body.innerHTML = html || noRes('Pages 项目或 Workers 脚本');
-  if (M.project) { $('#depProject').addEventListener('change', (e) => { M.project = e.target.value; refreshDepList(); }); refreshDepList(); }
-  if (M.script) { $('#depScript').addEventListener('change', (e) => { M.script = e.target.value; refreshWList(); }); refreshWList(); }
+  if (M.project) { $('#depProject').addEventListener('change', (e) => { M.project = e.target.value; refreshDepList(); loadPagesAdmin(); }); refreshDepList(); }
+  if (M.script) { $('#depScript').addEventListener('change', (e) => { M.script = e.target.value; refreshWList(); loadWorkersInfo(); }); refreshWList(); }
+  // v3: project admin + worker info + R2 buckets
+  body.insertAdjacentHTML('beforeend', `<div id="pgAdmin"></div><div id="wkInfo"></div>
+  <div style="margin-top:18px"><b>R2 存储桶管理</b>
+  <div class="mrow"><div><label class="mlab">新建桶名</label><input class="minput" id="r2NewName" placeholder="如 my-bucket"></div>
+  <div><label class="mlab">区域提示（可选）</label><select class="minput" id="r2Loc"><option value="">自动</option><option value="apac">亚太 APAC</option><option value="wnam">北美西部</option><option value="enam">北美东部</option><option value="weur">欧洲西部</option><option value="eeur">欧洲东部</option><option value="oc">大洋洲</option></select></div>
+  <div><button class="btn sm" id="r2Create">新建桶</button></div></div>
+  <div id="r2List">${(M.inv.buckets || []).map((b) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🪣 ${esc(b.name)}</span><button class="btn danger sm" data-r2-del="${esc(b.name)}">删除空桶</button></div>`).join('') || '<p class="hint">暂无存储桶</p>'}</div>
+  <p class="hint">只能删空桶；桶里文件的管理需要 S3 密钥，不在 API 令牌能力范围内。</p></div>`);
+  $('#r2Create').addEventListener('click', async () => {
+    try { await api('/api/r2admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, name: $('#r2NewName').value, location: $('#r2Loc').value }) }); toast('桶已新建（刷新详情生效）'); }
+    catch (e) { toast(e.message); }
+  });
+  $$('#r2List [data-r2-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+    try { await api(`/api/r2admin?account=${M.acct.id}&bucket=${encodeURIComponent(b.dataset.r2Del)}`, { method: 'DELETE' }); toast('桶已删除（刷新详情生效）'); }
+    catch (e) { toast(e.message); }
+  })));
+  loadPagesAdmin(); loadWorkersInfo();
+}
+async function loadPagesAdmin() {
+  const box = $('#pgAdmin'); if (!box || !M.project) return;
+  try {
+    const r = await api(`/api/pagesadmin?account=${M.acct.id}&project=${encodeURIComponent(M.project)}`);
+    const p = r.project;
+    box.innerHTML = `<div style="margin-top:14px"><b>项目信息 · ${esc(p.name)}</b>
+    <p class="hint">子域名 ${esc(p.subdomain || '')} · 生产分支 ${esc(p.productionBranch || '')} · 来源 ${esc(p.source || '直接上传')}${p.build.command ? ` · 构建命令 <code>${esc(p.build.command)}</code>` : ''}${p.build.destination ? ` · 输出目录 <code>${esc(p.build.destination)}</code>` : ''}</p>
+    ${p.envProduction.length ? `<p class="hint">生产环境变量（只显示名字）：${p.envProduction.map((e) => esc(e.name)).join('、')}</p>` : ''}
+    ${p.envPreview.length ? `<p class="hint">预览环境变量：${p.envPreview.map((e) => esc(e.name)).join('、')}</p>` : ''}
+    <div class="mrow"><div><label class="mlab">新建项目名</label><input class="minput" id="pgNewName" placeholder="如 my-site"></div>
+    <div><label class="mlab">生产分支</label><input class="minput" id="pgNewBranch" value="main"></div>
+    <div><button class="btn sm" id="pgCreate">新建项目</button> <button class="btn danger sm" id="pgDelete">删除当前项目</button></div></div></div>`;
+    $('#pgCreate').addEventListener('click', async () => {
+      try { await api('/api/pagesadmin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, name: $('#pgNewName').value, branch: $('#pgNewBranch').value }) }); toast('项目已新建（部署内容需通过 Git 或 wrangler 上传）'); }
+      catch (e) { toast(e.message); }
+    });
+    $('#pgDelete').addEventListener('click', (e) => arm(e.target, async () => {
+      try { await api(`/api/pagesadmin?account=${M.acct.id}&project=${encodeURIComponent(M.project)}`, { method: 'DELETE' }); toast('项目已删除（刷新详情生效）'); }
+      catch (err) { toast(err.message); }
+    }));
+  } catch (e) { box.innerHTML = ''; }
+}
+async function loadWorkersInfo() {
+  const box = $('#wkInfo'); if (!box || !M.script) return;
+  try {
+    const r = await api(`/api/workersinfo?account=${M.acct.id}&script=${encodeURIComponent(M.script)}`);
+    box.innerHTML = `<div style="margin-top:14px"><b>脚本信息 · ${esc(M.script)}</b>
+    ${r.subdomain ? `<p class="hint">workers.dev 子域名：${r.subdomain.enabled ? '已开启' : '未开启'}</p>` : ''}
+    ${r.bindings && r.bindings.length ? `<div class="chips" style="margin-top:4px">${r.bindings.map((b) => `<span class="chip2">${esc(b.type)} · ${esc(b.name)}${b.target ? ' → ' + esc(b.target) : ''}</span>`).join('')}</div>` : '<p class="hint">没有绑定（或令牌读不到脚本设置）</p>'}
+    ${r.schedules && r.schedules.length ? `<p class="hint" style="margin-top:4px">定时触发：${r.schedules.map((s) => esc(s.cron)).join('、')}</p>` : ''}</div>`;
+  } catch { box.innerHTML = ''; }
 }
 async function refreshDepList() {
   const box = $('#depList'); if (!box) return;
@@ -800,6 +946,214 @@ async function loadPurge() {
       toast('缓存已清理');
     } catch (err) { toast(err.message); }
   }));
+}
+</script>
+<script>
+/* ---------- v3 tabs: zone settings / rules / email / tunnels ---------- */
+/* health check + theme (settings modal) */
+$('#healthBtn')?.addEventListener('click', async () => {
+  const out = $('#healthOut');
+  out.innerHTML = '<p class="hint"><span class="spin"></span> 正在逐个验证令牌…</p>';
+  try {
+    const r = await api('/api/health', { method: 'POST', body: '{}' });
+    out.innerHTML = r.accounts.map((a) => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(a.name)}</b> <span class="tag">令牌 ${esc(a.tokenStatus)}</span><div class="chips" style="margin-top:4px">${Object.entries(a.probes).map(([k, v]) => `<span class="chip2">${v === 'ok' ? '✅' : '⚠️'} ${esc(k)}${v === 'ok' ? '' : '：' + esc(v)}</span>`).join('')}</div></div>`).join('') || '<p class="hint">还没有账号</p>';
+  } catch (e) { out.innerHTML = mErr(e); }
+});
+const themeSel = $('#setTheme');
+if (themeSel) {
+  themeSel.value = localStorage.getItem('ymcfp_theme') || 'auto';
+  themeSel.addEventListener('change', () => {
+    if (themeSel.value === 'auto') localStorage.removeItem('ymcfp_theme');
+    else localStorage.setItem('ymcfp_theme', themeSel.value);
+    applyTheme();
+  });
+}
+
+/* ----- Zone settings + DNSSEC + certificates ----- */
+async function loadZoneset() {
+  const body = $('#mBody');
+  if (!M.zone) { body.innerHTML = noRes('域名'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('zsZone')}</div></div><div id="zsBody"><p class="hint"><span class="spin"></span> 加载设置…</p></div><div id="certBody"></div>`;
+  $('#zsZone').addEventListener('change', (e) => { M.zone = e.target.value; loadZoneset(); });
+  try {
+    const r = await api(`/api/zoneset?account=${M.acct.id}&zone=${M.zone}`);
+    const rows = r.defs.map((def) => {
+      const cur = r.settings[def.id] || {};
+      if (cur.error) return `<div style="padding:7px 0;border-bottom:1px solid var(--line)"><span>${esc(def.label)}</span><span class="hint"> 读取失败：${esc(cur.error)}</span></div>`;
+      const ctrl = def.type === 'toggle'
+        ? `<select class="minput" style="max-width:130px" data-zs="${def.id}"><option value="on" ${cur.value === 'on' ? 'selected' : ''}>开</option><option value="off" ${cur.value === 'off' ? 'selected' : ''}>关</option></select>`
+        : `<select class="minput" style="max-width:170px" data-zs="${def.id}">${def.options.map((o) => `<option value="${o}" ${String(cur.value) === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+      return `<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(def.label)}</span>${ctrl}</div>`;
+    }).join('');
+    const ds = r.dnssec ? `<div style="display:flex;gap:10px;align-items:center;padding:7px 0"><span style="flex:1">DNSSEC（当前：${esc(r.dnssec.status || '未知')}）</span><select class="minput" style="max-width:130px" id="zsDnssec"><option value="off" ${r.dnssec.status !== 'active' ? 'selected' : ''}>关</option><option value="on" ${r.dnssec.status === 'active' ? 'selected' : ''}>开</option></select></div>
+    <p class="hint">开 DNSSEC 后还要去域名注册商那里添加 DS 记录才真正生效。</p>` : '';
+    $('#zsBody').innerHTML = rows + ds;
+    $$('#zsBody [data-zs]').forEach((sel) => sel.addEventListener('change', async () => {
+      try { await api('/api/zoneset', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, id: sel.dataset.zs, value: sel.value }) }); toast('设置已保存'); }
+      catch (e) { toast(e.message); loadZoneset(); }
+    }));
+    const dsSel = $('#zsDnssec');
+    if (dsSel) dsSel.addEventListener('change', async () => {
+      try { await api('/api/zoneset', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'dnssec', enabled: dsSel.value === 'on' }) }); toast('DNSSEC 已更新'); loadZoneset(); }
+      catch (e) { toast(e.message); }
+    });
+  } catch (e) { $('#zsBody').innerHTML = mErr(e); }
+  try {
+    const c = await api(`/api/certs?account=${M.acct.id}&zone=${M.zone}`);
+    $('#certBody').innerHTML = `<div style="margin-top:14px"><b>SSL 证书</b>
+    ${c.universal ? `<p class="hint">通用 SSL（免费证书）：${c.universal.enabled ? '已开启' : '未开启'}</p>` : `<p class="hint">证书状态读取失败${c.universalError ? '：' + esc(c.universalError) : ''}（令牌可能缺 SSL 证书权限）</p>`}
+    ${c.packs.map((p) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="tag">${esc(p.status)}</span> ${p.hosts.map(esc).join('、')}<span class="hint"> · ${esc(p.issuer || '')}${p.expires ? ' · 到期 ' + esc(String(p.expires).slice(0, 10)) : ''}</span></div>`).join('')}</div>`;
+  } catch { /* certs optional */ }
+}
+
+/* ----- Rules: rulesets + page rules ----- */
+async function loadRules() {
+  const body = $('#mBody');
+  if (!M.zone) { body.innerHTML = noRes('域名'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('rlZone')}</div></div>
+  <div id="rlSets"><p class="hint"><span class="spin"></span> 加载规则集…</p></div>
+  <div style="margin-top:16px"><b>页面规则（Page Rules）</b><div id="prList"><p class="hint"><span class="spin"></span> 加载…</p></div>
+  <div class="mrow"><div><label class="mlab">URL 匹配（如 example.com/old/*）</label><input class="minput" id="prUrl" placeholder="域名/路径/*"></div>
+  <div><label class="mlab">类型</label><select class="minput" id="prKind"><option value="forward">跳转到新网址</option><option value="cache">缓存级别</option><option value="ssl">SSL 模式</option></select></div>
+  <div><label class="mlab">目标/取值</label><input class="minput" id="prVal" placeholder="跳转填完整网址；缓存填 cache_everything；SSL 填 flexible/full"></div></div>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="prAdd">新增页面规则</button></div>
+  <p class="hint">免费版每个域名最多 3 条页面规则。</p></div>`;
+  $('#rlZone').addEventListener('change', (e) => { M.zone = e.target.value; loadRules(); });
+  $('#prAdd').addEventListener('click', async () => {
+    const kind = $('#prKind').value, val = $('#prVal').value;
+    const payload = { account: M.acct.id, zone: M.zone, what: 'pagerule-create', url: $('#prUrl').value, kind };
+    if (kind === 'forward') payload.forwardUrl = val;
+    if (kind === 'cache') payload.cacheLevel = val || 'cache_everything';
+    if (kind === 'ssl') payload.sslMode = val || 'flexible';
+    try { await api('/api/rules', { method: 'POST', body: JSON.stringify(payload) }); toast('页面规则已创建'); refreshPrList(); }
+    catch (e) { toast(e.message); }
+  });
+  try {
+    const r = await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}`);
+    $('#rlSets').innerHTML = r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label></div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>';
+    $$('#rlSets [data-rule-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
+      const [rs, rule] = cb.dataset.ruleToggle.split('|');
+      try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle-rule', ruleset: rs, rule, enabled: cb.checked }) }); toast('规则已更新'); }
+      catch (e) { toast(e.message); loadRules(); }
+    }));
+  } catch (e) { $('#rlSets').innerHTML = mErr(e); }
+  refreshPrList();
+}
+async function refreshPrList() {
+  const box = $('#prList'); if (!box) return;
+  try {
+    const r = await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}&what=pagerules`);
+    box.innerHTML = r.rules.length ? r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${x.targets.map(esc).join('、')}<br><span class="small muted">${x.actions.map(esc).join('、')} · 优先级 ${x.priority}</span></span><label class="small"><input type="checkbox" data-pr-toggle="${x.id}" ${x.status === 'active' ? 'checked' : ''}> 启用</label><button class="btn danger sm" data-pr-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无页面规则</p>';
+    box.querySelectorAll('[data-pr-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
+      try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'pagerule-toggle', id: cb.dataset.prToggle, enabled: cb.checked }) }); toast('已更新'); }
+      catch (e) { toast(e.message); refreshPrList(); }
+    }));
+    box.querySelectorAll('[data-pr-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}&id=${b.dataset.prDel}`, { method: 'DELETE' }); toast('已删除'); refreshPrList(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+
+/* ----- Email routing ----- */
+async function loadEmail() {
+  const body = $('#mBody');
+  if (!M.zone) { body.innerHTML = noRes('域名'); return; }
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('emZone')}</div></div><div id="emBody"><p class="hint"><span class="spin"></span> 加载邮件转发…</p></div>`;
+  $('#emZone').addEventListener('change', (e) => { M.zone = e.target.value; loadEmail(); });
+  try {
+    const [r, dest] = await Promise.all([
+      api(`/api/emailroute?account=${M.acct.id}&zone=${M.zone}`),
+      api(`/api/emailroute?account=${M.acct.id}&what=destinations`).catch(() => ({ addresses: [] })),
+    ]);
+    const zoneName = (M.inv.zones.find((z) => z.id === M.zone) || {}).name || '';
+    $('#emBody').innerHTML = `
+    <p class="hint">邮件路由状态：${r.enabled ? '🟢 已启用' : '⚪ 未启用'}${r.synced ? ' · DNS 记录已同步' : ''} <button class="btn ghost sm" id="emToggle">${r.enabled ? '关闭邮件路由' : '启用邮件路由'}</button></p>
+    <div style="margin-top:10px"><b>转发规则</b>
+    ${r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(x.match)} → ${x.forwardTo.map(esc).join('、')}<span class="small muted"> ${x.enabled ? '' : '（已停用）'}</span></span><button class="btn danger sm" data-em-del="${x.id}">删除</button></div>`).join('') || '<p class="hint">暂无规则</p>'}
+    ${r.catchall ? `<p class="hint" style="margin-top:6px">全部接收（catch-all）：${r.catchall.enabled ? '开' : '关'}${r.catchall.forwardTo.length ? ' → ' + r.catchall.forwardTo.map(esc).join('、') : ''}</p>` : ''}
+    </div>
+    <div class="mrow"><div><label class="mlab">新规则：接收地址（本域名）</label><input class="minput" id="emFrom" placeholder="me@${esc(zoneName)}"></div>
+    <div><label class="mlab">转发到（需先在下方目标地址里验证）</label><input class="minput" id="emTo" placeholder="you@gmail.com"></div>
+    <div><button class="btn sm" id="emAdd">添加规则</button></div></div>
+    <div style="margin-top:10px"><b>目标地址（账号级）</b>
+    ${dest.addresses.map((d) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)">${esc(d.email)} <span class="tag">${d.verified ? '已验证' : '未验证'}</span></div>`).join('') || '<p class="hint">读不到目标地址（可能缺 Email Routing Addresses 权限）</p>'}</div>`;
+    $('#emToggle').addEventListener('click', async () => {
+      try { await api('/api/emailroute', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle', enabled: !r.enabled }) }); toast('已更新'); loadEmail(); }
+      catch (e) { toast(e.message); }
+    });
+    $('#emAdd').addEventListener('click', async () => {
+      try { await api('/api/emailroute', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'add-rule', email: $('#emFrom').value, forwardTo: $('#emTo').value }) }); toast('规则已添加'); loadEmail(); }
+      catch (e) { toast(e.message); }
+    });
+    $$('#emBody [data-em-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/emailroute?account=${M.acct.id}&zone=${M.zone}&id=${b.dataset.emDel}`, { method: 'DELETE' }); toast('已删除'); loadEmail(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { $('#emBody').innerHTML = mErr(e); }
+}
+
+/* ----- Tunnels ----- */
+async function loadTunnel() {
+  const body = $('#mBody');
+  body.innerHTML = `<div id="tnBody"><p class="hint"><span class="spin"></span> 加载隧道…</p></div>
+  <div style="margin-top:14px"><b>新建隧道</b>
+  <div class="mrow"><div><label class="mlab">隧道名</label><input class="minput" id="tnName" placeholder="如 home-nas"></div>
+  <div><button class="btn sm" id="tnCreate">创建</button></div></div>
+  <div id="tnToken"></div>
+  <p class="hint">创建后把令牌填到你设备上的 cloudflared 里运行（令牌只显示这一次）。再回到隧道详情里加「公共主机名」规则，并一键生成 DNS 记录就能访问。</p></div>`;
+  $('#tnCreate').addEventListener('click', async () => {
+    try {
+      const r = await api('/api/tunnels', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'create', name: $('#tnName').value }) });
+      $('#tnToken').innerHTML = `<div class="warnbox">隧道已创建。运行令牌（只显示这一次，请复制保存）：<br><code style="word-break:break-all">${esc(r.token || '')}</code><br>在设备上运行：<code>cloudflared tunnel run --token 上面的令牌</code></div>`;
+      refreshTnList();
+    } catch (e) { toast(e.message); }
+  });
+  refreshTnList();
+}
+async function refreshTnList() {
+  const box = $('#tnBody'); if (!box) return;
+  try {
+    const r = await api(`/api/tunnels?account=${M.acct.id}`);
+    box.innerHTML = r.tunnels.length ? r.tunnels.map((t) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(t.name)}</b> <span class="tag">${esc(t.status || '')}</span> <span class="hint">连接 ${t.connections} · 建于 ${esc(String(t.created || '').slice(0, 10))}</span>
+    <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" data-tn-view="${t.id}">主机名规则</button><button class="btn danger sm" data-tn-del="${t.id}">删除隧道</button></div>
+    <div id="tnDetail-${t.id}"></div></div>`).join('') : '<p class="hint">这个账号还没有隧道。</p>';
+    box.querySelectorAll('[data-tn-view]').forEach((b) => b.addEventListener('click', () => loadTnDetail(b.dataset.tnView)));
+    box.querySelectorAll('[data-tn-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/tunnels?account=${M.acct.id}&tunnel=${b.dataset.tnDel}`, { method: 'DELETE' }); toast('隧道已删除'); refreshTnList(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadTnDetail(id) {
+  const box = document.getElementById('tnDetail-' + id); if (!box) return;
+  box.innerHTML = '<p class="hint"><span class="spin"></span> 加载规则…</p>';
+  try {
+    const r = await api(`/api/tunnels?account=${M.acct.id}&tunnel=${id}`);
+    const rows = r.ingress.filter((x) => x.hostname);
+    box.innerHTML = `${rows.map((x, i) => `<div class="mrow" data-ing-row><div><label class="mlab">主机名</label><input class="minput" data-ing-host value="${esc(x.hostname)}"></div><div><label class="mlab">服务（如 http://localhost:8080）</label><input class="minput" data-ing-svc value="${esc(x.service)}"></div></div>`).join('') || '<p class="hint">还没有主机名规则</p>'}
+    <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="ingAdd-${id}">＋ 加一行</button><button class="btn sm" id="ingSave-${id}">保存规则</button></div>
+    <div class="mrow"><div><label class="mlab">给某个主机名一键生成 DNS（选域名）</label>${zoneSel('routeZone-' + id)}</div>
+    <div><label class="mlab">主机名（完整，如 nas.example.com）</label><input class="minput" id="routeHost-${id}" placeholder="nas.example.com"></div>
+    <div><button class="btn ghost sm" id="routeBtn-${id}">生成 CNAME</button></div></div>`;
+    document.getElementById('ingAdd-' + id).addEventListener('click', () => {
+      const div = document.createElement('div');
+      div.className = 'mrow'; div.dataset.ingRow = '';
+      div.innerHTML = `<div><label class="mlab">主机名</label><input class="minput" data-ing-host></div><div><label class="mlab">服务</label><input class="minput" data-ing-svc placeholder="http://localhost:8080"></div>`;
+      box.insertBefore(div, box.querySelector('.btns'));
+    });
+    document.getElementById('ingSave-' + id).addEventListener('click', async () => {
+      const rules = [...box.querySelectorAll('[data-ing-row]')].map((row) => ({ hostname: row.querySelector('[data-ing-host]').value, service: row.querySelector('[data-ing-svc]').value }));
+      try { await api('/api/tunnels', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'ingress', tunnel: id, rules }) }); toast('规则已保存'); }
+      catch (e) { toast(e.message); }
+    });
+    document.getElementById('routeBtn-' + id).addEventListener('click', async () => {
+      try {
+        await api('/api/tunnels', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'route', tunnel: id, zone: document.getElementById('routeZone-' + id).value, hostname: document.getElementById('routeHost-' + id).value }) });
+        toast('CNAME 已生成');
+      } catch (e) { toast(e.message); }
+    });
+  } catch (e) { box.innerHTML = mErr(e); }
 }
 </script>
 </body>

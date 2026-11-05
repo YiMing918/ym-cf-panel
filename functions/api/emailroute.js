@@ -10,8 +10,10 @@ export async function onRequestGet({ request, env }) {
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     const what = url.searchParams.get('what');
     if (what === 'destinations') {
-      const d = await cfApi(acct, `/accounts/${acct.accountId}/email/routing/addresses?per_page=50`);
-      return json({ addresses: (d.result || []).map((x) => ({ id: x.id, email: x.email, verified: x.verified })) });
+      try {
+        const d = await cfApi(acct, `/accounts/${acct.accountId}/email/routing/addresses?per_page=50`);
+        return json({ addresses: (d.result || []).map((x) => ({ id: x.id, email: x.email, verified: x.verified })) });
+      } catch (e) { return json({ addresses: [], error: String(e.message || e) }); }
     }
     const zone = url.searchParams.get('zone');
     const [settings, rules, ca] = await Promise.all([

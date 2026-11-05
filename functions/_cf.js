@@ -90,9 +90,11 @@ const Q_R2 = `query($a: String!, $s: Date!, $e: Date!) { viewer { accounts(filte
     max { payloadSize } dimensions { bucketName } }
 } } }`;
 
+// NOTE: httpRequestsAdaptiveGroups has no sum.requests/sum.bytes — request count is
+// the top-level `count` field and transfer is sum.edgeResponseBytes (per CF migration guide).
 const Q_ZONE_HTTP = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(filter: {zoneTag: $z}) {
   httpRequestsAdaptiveGroups(limit: 1000, filter: {datetime_geq: $s, datetime_leq: $e}) {
-    sum { requests bytes } dimensions { clientCountryName } }
+    count sum { edgeResponseBytes } dimensions { clientCountryName } }
 } } }`;
 
 export async function verifyToken(account) {
@@ -212,17 +214,22 @@ export async function getUsage(account, range) {
   let http = { ok: false, error: 'no zones' };
   if (inv.ok && inv.data.zones && inv.data.zones.length) {
     http = await section(async () => {
-      let requests = 0, bytes = 0;
+      let requests = 0, bytes = 0, firstError = null, okZones = 0;
       const countries = {};
       for (const z of inv.data.zones.slice(0, 20)) {
-        const d = await gql(account, Q_ZONE_HTTP, { z: z.id, s: w.startISO, e: w.endISO });
-        const rows = ((d.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [];
-        for (const row of rows) {
-          requests += row.sum.requests; bytes += row.sum.bytes;
-          const c = row.dimensions.clientCountryName || 'Unknown';
-          countries[c] = (countries[c] || 0) + row.sum.requests;
-        }
+        try {
+          const d = await gql(account, Q_ZONE_HTTP, { z: z.id, s: w.startISO, e: w.endISO });
+          const rows = ((d.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [];
+          okZones++;
+          for (const row of rows) {
+            const n = row.count || 0;
+            requests += n; bytes += (row.sum && row.sum.edgeResponseBytes) || 0;
+            const c = row.dimensions.clientCountryName || 'Unknown';
+            countries[c] = (countries[c] || 0) + n;
+          }
+        } catch (e) { if (!firstError) firstError = e; }
       }
+      if (!okZones && firstError) throw firstError;
       return {
         requests, bytes,
         topCountries: Object.entries(countries).map(([name, requests]) => ({ name, requests }))

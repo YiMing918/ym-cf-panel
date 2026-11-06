@@ -17,7 +17,7 @@ export async function onRequestGet({ request, env }) {
       cfApi(acct, `${AA(acct)}/load_balancers/pools?per_page=50`).catch(() => null),
       cfApi(acct, `${AA(acct)}/load_balancers/monitors?per_page=50`).catch(() => null),
     ]);
-    if (lbs.error) return json({ error: lbs.error });
+    if (lbs.error) return json({ error: lbs.error }, 502);
     return json({
       lbs: (lbs.result || []).map((x) => ({ id: x.id, name: x.name, enabled: x.enabled, proxied: x.proxied, fallbackPool: x.fallback_pool, pools: (x.default_pools || []).length })),
       pools: ((pools && pools.result) || []).map((x) => ({ id: x.id, name: x.name, enabled: x.enabled, origins: (x.origins || []).length })),

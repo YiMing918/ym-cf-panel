@@ -10,7 +10,14 @@ export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
-    const d = await cfApi(acct, `${A(acct)}?per_page=50`);
+    let d;
+    try { d = await cfApi(acct, `${A(acct)}?per_page=50`); }
+    catch (e) {
+      // Stream is a paid add-on: without it the API answers with an
+      // authorization failure — present that as "not activated", not an error.
+      if (/authoriz/i.test(String(e.message || e))) return json({ videos: [], unavailable: true });
+      throw e;
+    }
     return json({
       videos: (d.result || []).map((v) => ({
         uid: v.uid, name: (v.meta && v.meta.name) || '(未命名)', state: v.status && v.status.state,

@@ -126,9 +126,11 @@ export async function onRequestDelete({ request, env }) {
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     if (url.searchParams.get('what') === 'rule') {
       await cfApi(acct, `/zones/${url.searchParams.get('zone')}/rulesets/${url.searchParams.get('ruleset')}/rules/${url.searchParams.get('rule')}`, { method: 'DELETE' });
+      await addAudit(env, a.sess.user, 'rule.delete', `${acct.name} · 删除 WAF 规则`);
       return json({ ok: true });
     }
     await cfApi(acct, `/zones/${url.searchParams.get('zone')}/pagerules/${url.searchParams.get('id')}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'pagerule.delete', `${acct.name} · 删除页面规则`);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

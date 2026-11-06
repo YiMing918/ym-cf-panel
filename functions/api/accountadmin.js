@@ -19,7 +19,7 @@ export async function onRequestGet({ request, env }) {
         cfApi(acct, `${A(acct)}/members?per_page=50`).catch((e) => ({ error: String(e.message || e) })),
         cfApi(acct, `${A(acct)}/roles?per_page=50`).catch(() => null),
       ]);
-      if (m.error) return json({ error: m.error });
+      if (m.error) return json({ error: m.error }, 502);
       return json({
         members: (m.result || []).map((x) => ({
           id: x.id, email: (x.user && x.user.email) || '', status: x.status,
@@ -34,7 +34,7 @@ export async function onRequestGet({ request, env }) {
       return json({ profile: { name: [p.first_name, p.last_name].filter(Boolean).join(' '), company: p.company || '', country: p.country || '', currency: '', payment: p.payment_method || p.card_info || null } });
     }
     if (what === 'auditlog') {
-      const d = await cfApi(acct, `${A(acct)}/audit_logs?per_page=50&direction=-1`);
+      const d = await cfApi(acct, `${A(acct)}/audit_logs?per_page=50`);
       return json({
         entries: (d.result || []).map((x) => ({
           at: x.when, actor: (x.actor && (x.actor.email || x.actor.name)) || '', ip: (x.actor && x.actor.ip) || '',

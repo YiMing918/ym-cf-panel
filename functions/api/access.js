@@ -15,7 +15,7 @@ export async function onRequestGet({ request, env }) {
       cfApi(acct, `${A(acct)}/apps?per_page=50`).catch((e) => ({ error: String(e.message || e) })),
       cfApi(acct, `${A(acct)}/service_tokens?per_page=50`).catch(() => null),
     ]);
-    if (apps.error) return json({ error: apps.error });
+    if (apps.error) return json({ error: apps.error }, 502);
     return json({
       apps: (apps.result || []).map((x) => ({
         id: x.id, name: x.name, domain: x.domain, type: x.type,

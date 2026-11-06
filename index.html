@@ -459,7 +459,7 @@ function renderDetail(id) {
       <div><div class="k">总请求</div><div class="v">${fmt(h.requests)}</div></div>
       <div><div class="k">总流量</div><div class="v">${fmtBytes(h.bytes)}</div></div></div>
       ${h.topCountries.map((c) => `<div class="cbar"><span class="n">${esc(c.name)}</span><span class="t"><i style="width:${(c.requests / maxC) * 100}%"></i></span><span class="v">${fmt(c.requests)}</span></div>`).join('') || '<p class="hint">暂无流量数据</p>'}`;
-    if (h.byZone && h.byZone.length > 1) html += `<div style="margin-top:10px"><b>按域名拆分</b>${tableHtml(['域名', '请求', '流量'], h.byZone.map((z) => `<tr><td>${esc(z.name)}</td><td>${fmt(z.requests)}</td><td>${fmtBytes(z.bytes)}</td></tr>`))}</div>`;
+    if (h.byZone && h.byZone.length >= 1) html += `<div style="margin-top:10px"><b>按域名拆分</b>${tableHtml(['域名', '请求', '流量'], h.byZone.map((z) => `<tr><td>${esc(z.name)}</td><td>${fmt(z.requests)}</td><td>${fmtBytes(z.bytes)}</td></tr>`))}</div>`;
     if (h.cacheHitPct !== null && h.cacheHitPct !== undefined) html += `<p class="hint" style="margin-top:8px">缓存命中率 <b style="color:var(--text)">${h.cacheHitPct}%</b>（命中/过期/更新中的请求占比）</p>`;
     if (h.statusCodes && h.statusCodes.length) html += `<div style="margin-top:6px"><b>状态码分布</b><div class="chips" style="margin-top:6px">${h.statusCodes.map((s) => `<span class="chip2">${s.code} · ${fmt(s.requests)}</span>`).join('')}</div></div>`;
     if (h.topPaths && h.topPaths.length) {
@@ -1106,7 +1106,7 @@ async function loadRules() {
     <div><label class="mlab">动作</label><select class="minput" id="wafAction"><option value="block">拦截 block</option><option value="managed_challenge">托管质询</option><option value="js_challenge">JS 质询</option><option value="challenge">质询 challenge</option><option value="log">只记录 log</option></select></div></div>
     <label class="mlab">表达式（Cloudflare 规则表达式语法）</label><input class="minput" id="wafExpr" placeholder='如 (http.user_agent contains "sqlmap") 或 (ip.src in {1.2.3.4})'>
     <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="wafSave">保存规则</button><button class="btn ghost sm" id="wafCancelEdit" style="display:none">取消编辑</button></div>
-    <p class="hint">先拿不准就用「只记录 log」试跑，确认命中再改成拦截。删除规则要点两次确认。</p></div>`;
+    <p class="hint">注意：免费版域名用不了「只记录 log」动作（Cloudflare 会拒绝），先用很窄的表达式小范围试拦截，或用托管质询。删除规则要点两次确认。</p></div>`;
     $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
     $$('#rlSets [data-rule-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       const [rs, rule] = cb.dataset.ruleToggle.split('|');
@@ -1465,7 +1465,7 @@ async function loadStream() {
   const box = $('#pdStream'); if (!box) return;
   try {
     const r = await api(`/api/stream?account=${M.acct.id}`);
-    box.innerHTML = r.videos.length ? r.videos.map((v) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🎬 ${esc(v.name)} <span class="tag">${esc(v.state || '')}</span><span class="hint"> · ${Math.round(v.duration || 0)}s · ${fmtBytes(v.size || 0)}</span></span>${v.hls ? `<a href="${esc(v.hls)}" target="_blank" rel="noopener">播放链接</a>` : ''}<button class="btn danger sm" data-vid-del="${v.uid}">删除</button></div>`).join('') : '<p class="hint">暂无视频（Stream 是付费产品，没开通时这里为空）</p>';
+    box.innerHTML = r.unavailable ? '<p class="hint">这个账号未开通 Stream（付费产品），开通后视频会显示在这里。</p>' : (r.videos.length ? r.videos.map((v) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🎬 ${esc(v.name)} <span class="tag">${esc(v.state || '')}</span><span class="hint"> · ${Math.round(v.duration || 0)}s · ${fmtBytes(v.size || 0)}</span></span>${v.hls ? `<a href="${esc(v.hls)}" target="_blank" rel="noopener">播放链接</a>` : ''}<button class="btn danger sm" data-vid-del="${v.uid}">删除</button></div>`).join('') : '<p class="hint">暂无视频</p>');
     $$('#pdStream [data-vid-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/stream?account=${M.acct.id}&uid=${b.dataset.vidDel}`, { method: 'DELETE' }); toast('视频已删除'); loadStream(); }
       catch (e) { toast(e.message); }

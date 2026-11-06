@@ -16,6 +16,22 @@ export function maskAccount(a) {
   };
 }
 
+// Panel-local audit log of management actions (last 100). Never stores tokens
+// or secret values — action name + a short human detail only.
+export async function addAudit(env, user, action, detail) {
+  try {
+    const raw = await env.PANEL_KV.get('audit');
+    const list = raw ? JSON.parse(raw) : [];
+    list.unshift({ at: Date.now(), user: user || '', action, detail: String(detail || '').slice(0, 200) });
+    await env.PANEL_KV.put('audit', JSON.stringify(list.slice(0, 100)));
+  } catch { /* auditing must never break the action itself */ }
+}
+
+export async function getAudit(env) {
+  const raw = await env.PANEL_KV.get('audit');
+  return raw ? JSON.parse(raw) : [];
+}
+
 export async function getSettings(env) {
   const raw = await env.PANEL_KV.get('settings');
   const s = raw ? JSON.parse(raw) : {};

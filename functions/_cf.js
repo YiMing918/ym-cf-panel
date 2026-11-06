@@ -228,17 +228,20 @@ export async function getUsage(account, range) {
     http = await section(async () => {
       let requests = 0, bytes = 0, firstError = null, okZones = 0;
       const countries = {};
+      const byZone = [];
       for (const z of inv.data.zones.slice(0, 20)) {
         try {
           const d = await gql(account, Q_ZONE_HTTP, { z: z.id, s: w.startISO, e: w.endISO });
           const rows = ((d.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [];
           okZones++;
+          let zr = 0, zb = 0;
           for (const row of rows) {
-            const n = row.count || 0;
-            requests += n; bytes += (row.sum && row.sum.edgeResponseBytes) || 0;
+            const n = row.count || 0, b = (row.sum && row.sum.edgeResponseBytes) || 0;
+            requests += n; bytes += b; zr += n; zb += b;
             const c = row.dimensions.clientCountryName || 'Unknown';
             countries[c] = (countries[c] || 0) + n;
           }
+          byZone.push({ name: z.name, requests: zr, bytes: zb });
         } catch (e) { if (!firstError) firstError = e; }
       }
       if (!okZones && firstError) throw firstError;
@@ -246,6 +249,7 @@ export async function getUsage(account, range) {
         requests, bytes,
         topCountries: Object.entries(countries).map(([name, requests]) => ({ name, requests }))
           .sort((x, y) => y.requests - x.requests).slice(0, 8),
+        byZone: byZone.sort((x, y) => y.requests - x.requests),
       };
       // v3 extras (best-effort, same Zone Analytics Read permission)
       try {

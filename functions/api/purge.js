@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 export async function onRequestPost({ request, env }) {
   const a = await requireAuth(env, request); if (a.error) return a.error;
@@ -13,6 +14,7 @@ export async function onRequestPost({ request, env }) {
       payload = { files: urls };
     } else payload = { purge_everything: true };
     await cfApi(acct, `/zones/${b.zone}/purge_cache`, { method: 'POST', body: JSON.stringify(payload) });
+    await addAudit(env, a.sess.user, 'cache.purge.post', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

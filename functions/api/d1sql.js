@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 async function query(acct, db, sql, params = []) {
   const data = await cfApi(acct, `/accounts/${acct.accountId}/d1/database/${db}/query`, { method: 'POST', body: JSON.stringify({ sql, params }) });
@@ -26,6 +27,7 @@ export async function onRequestPost({ request, env }) { // run SQL (writes are R
     if (sql.length > 20000) return json({ error: 'SQL 太长' }, 400);
     const acct = await resolveAccount(env, b.account);
     const r = await query(acct, b.db, sql);
+    await addAudit(env, a.sess.user, 'd1.sql.post', acct.name);
     return json({ ok: true, rows: r.rows.slice(0, 500), meta: { rowsRead: r.meta.rows_read, rowsWritten: r.meta.rows_written, changes: r.meta.changes, duration: r.meta.duration } });
   } catch (e) { return fail(e); }
 }

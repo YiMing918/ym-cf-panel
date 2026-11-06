@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // R2 bucket create / delete (bucket-level only; object ops need S3 keys, not API tokens).
 // Needs Workers R2 Storage → Edit.
@@ -13,6 +14,7 @@ export async function onRequestPost({ request, env }) {
     const payload = { name };
     if (b.location) payload.locationHint = String(b.location);
     await cfApi(acct, `/accounts/${acct.accountId}/r2/buckets`, { method: 'POST', body: JSON.stringify(payload) });
+    await addAudit(env, a.sess.user, 'r2.post', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }
@@ -23,6 +25,7 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     await cfApi(acct, `/accounts/${acct.accountId}/r2/buckets/${encodeURIComponent(url.searchParams.get('bucket'))}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'r2.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

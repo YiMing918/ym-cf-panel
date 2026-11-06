@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 export async function onRequestGet({ request, env }) { // deployments of one project
   const a = await requireAuth(env, request); if (a.error) return a.error;
@@ -26,6 +27,7 @@ export async function onRequestPost({ request, env }) { // rollback | retry
     if (b.action === 'rollback') await cfApi(acct, path + '/rollback', { method: 'POST' });
     else if (b.action === 'retry') await cfApi(acct, path + '/retry', { method: 'POST' });
     else return json({ error: '未知操作' }, 400);
+    await addAudit(env, a.sess.user, 'pages.deploy.post', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

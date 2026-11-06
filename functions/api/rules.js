@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // Zone rulesets (WAF custom / cache / redirect / transform phases) with per-rule
 // enable/disable, plus legacy Page Rules list/toggle/create/delete.
@@ -69,6 +70,34 @@ export async function onRequestPost({ request, env }) {
       await cfApi(acct, `/zones/${b.zone}/pagerules/${b.id}`, { method: 'PATCH', body: JSON.stringify({ status: b.enabled ? 'active' : 'disabled' }) });
       return json({ ok: true });
     }
+    if (b.what === 'rule-create' || b.what === 'rule-edit') {
+      const ACTIONS = ['block', 'challenge', 'js_challenge', 'managed_challenge', 'log'];
+      const expression = String(b.expression || '').trim();
+      if (!expression) return json({ error: '规则表达式不能为空' }, 400);
+      if (!ACTIONS.includes(b.action)) return json({ error: '动作只能是 block/challenge/js_challenge/managed_challenge/log' }, 400);
+      const rule = { expression, action: b.action, description: String(b.description || '').slice(0, 100), enabled: b.enabled !== false };
+      if (b.what === 'rule-create') {
+        await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}/rules`, { method: 'POST', body: JSON.stringify(rule) });
+      } else {
+        await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}/rules/${b.rule}`, { method: 'PATCH', body: JSON.stringify(rule) });
+      }
+      await addAudit(env, a.sess.user, 'rule.' + b.what, `${acct.name} · ${rule.action} ${rule.expression.slice(0, 80)}`);
+      return json({ ok: true });
+    }
+    if (b.what === 'ruleset-create') {
+      const ACTIONS = ['block', 'challenge', 'js_challenge', 'managed_challenge', 'log'];
+      const expression = String(b.expression || '').trim();
+      if (!expression || !ACTIONS.includes(b.action)) return json({ error: '表达式或动作不对' }, 400);
+      await cfApi(acct, `/zones/${b.zone}/rulesets`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'default', kind: 'zone', phase: 'http_request_firewall_custom',
+          rules: [{ expression, action: b.action, description: String(b.description || '').slice(0, 100), enabled: true }],
+        }),
+      });
+      await addAudit(env, a.sess.user, 'rule.ruleset-create', `${acct.name} · ${b.action} ${expression.slice(0, 80)}`);
+      return json({ ok: true });
+    }
     if (b.what === 'pagerule-create') {
       const urlPattern = String(b.url || '').trim();
       if (!urlPattern) return json({ error: 'URL 匹配模式不能为空' }, 400);
@@ -95,6 +124,10 @@ export async function onRequestDelete({ request, env }) {
   try {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
+    if (url.searchParams.get('what') === 'rule') {
+      await cfApi(acct, `/zones/${url.searchParams.get('zone')}/rulesets/${url.searchParams.get('ruleset')}/rules/${url.searchParams.get('rule')}`, { method: 'DELETE' });
+      return json({ ok: true });
+    }
     await cfApi(acct, `/zones/${url.searchParams.get('zone')}/pagerules/${url.searchParams.get('id')}`, { method: 'DELETE' });
     return json({ ok: true });
   } catch (e) { return fail(e); }

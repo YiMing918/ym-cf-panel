@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // Pages project detail / create / delete. Detail needs Pages Read; writes need Edit.
 // Env var VALUES are never returned — names and types only.
@@ -38,6 +39,7 @@ export async function onRequestPost({ request, env }) {
     await cfApi(acct, `/accounts/${acct.accountId}/pages/projects`, {
       method: 'POST', body: JSON.stringify({ name, production_branch: String(b.branch || 'main').trim() || 'main' }),
     });
+    await addAudit(env, a.sess.user, 'pages.post', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }
@@ -48,6 +50,7 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     await cfApi(acct, `/accounts/${acct.accountId}/pages/projects/${encodeURIComponent(url.searchParams.get('project'))}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'pages.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

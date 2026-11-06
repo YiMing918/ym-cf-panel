@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 const base = (acct, ns) => `/accounts/${acct.accountId}/storage/kv/namespaces/${ns}`;
 
@@ -32,6 +33,7 @@ export async function onRequestPut({ request, env }) {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.success === false) throw new Error((data.errors && data.errors[0] && data.errors[0].message) || ('HTTP ' + r.status));
+    await addAudit(env, a.sess.user, 'kv.put', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }
@@ -42,6 +44,7 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     await cfApi(acct, `${base(acct, url.searchParams.get('ns'))}/values/${encodeURIComponent(url.searchParams.get('key'))}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'kv.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

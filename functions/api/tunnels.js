@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // Cloudflare Tunnel: list / create / delete / ingress view + one-click DNS route.
 // Needs Account → Cloudflare Tunnel Edit (+ DNS Edit for the route record).
@@ -42,6 +43,7 @@ export async function onRequestPost({ request, env }) {
       if (!name) return json({ error: '隧道名不能为空' }, 400);
       const d = await cfApi(acct, base(acct), { method: 'POST', body: JSON.stringify({ name, config_src: 'cloudflare' }) });
       // Token is shown ONCE to the logged-in admin so they can run cloudflared.
+      await addAudit(env, a.sess.user, 'tunnel.post', acct.name);
       return json({ ok: true, id: d.result && d.result.id, token: d.result && d.result.token });
     }
     if (b.what === 'route') {
@@ -51,6 +53,7 @@ export async function onRequestPost({ request, env }) {
         method: 'POST',
         body: JSON.stringify({ type: 'CNAME', name: host, content: `${b.tunnel}.cfargotunnel.com`, proxied: true, ttl: 1 }),
       });
+      await addAudit(env, a.sess.user, 'tunnel.post', acct.name);
       return json({ ok: true });
     }
     if (b.what === 'ingress') {
@@ -59,6 +62,7 @@ export async function onRequestPost({ request, env }) {
       const rules = rulesIn.filter((r) => r.hostname && r.service).map((r) => ({ hostname: String(r.hostname).trim(), service: String(r.service).trim() }));
       rules.push({ service: 'http_status:404' });
       await cfApi(acct, `${base(acct)}/${b.tunnel}/configurations`, { method: 'PUT', body: JSON.stringify({ config: { ingress: rules } }) });
+      await addAudit(env, a.sess.user, 'tunnel.post', acct.name);
       return json({ ok: true });
     }
     return json({ error: '未知操作' }, 400);
@@ -73,6 +77,7 @@ export async function onRequestDelete({ request, env }) {
     const id = url.searchParams.get('tunnel');
     await cfApi(acct, `${base(acct)}/${id}/connections`, { method: 'DELETE' }).catch(() => null);
     await cfApi(acct, `${base(acct)}/${id}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'tunnel.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

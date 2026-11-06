@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // Workers versions + deployments; deploying a version = rollback/roll-forward.
 export async function onRequestGet({ request, env }) {
@@ -30,6 +31,7 @@ export async function onRequestPost({ request, env }) { // deploy one version at
       method: 'POST',
       body: JSON.stringify({ strategy: 'percentage', versions: [{ version_id: b.version, percentage: 100 }], annotations: { 'workers/message': 'Deployed from YM CF Panel' } }),
     });
+    await addAudit(env, a.sess.user, 'workers.deploy.post', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

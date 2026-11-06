@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 function bodyOf(b) {
   const out = { type: String(b.type || 'A').toUpperCase(), name: String(b.name || '').trim(), content: String(b.content || '').trim(), ttl: Number(b.ttl) || 1 };
@@ -27,6 +28,7 @@ export async function onRequestPost({ request, env }) {
     const b = await readBody(request);
     const acct = await resolveAccount(env, b.account);
     const data = await cfApi(acct, `/zones/${b.zone}/dns_records`, { method: 'POST', body: JSON.stringify(bodyOf(b)) });
+    await addAudit(env, a.sess.user, 'dns.post', acct.name);
     return json({ ok: true, record: data.result });
   } catch (e) { return fail(e); }
 }
@@ -37,6 +39,7 @@ export async function onRequestPut({ request, env }) {
     const b = await readBody(request);
     const acct = await resolveAccount(env, b.account);
     const data = await cfApi(acct, `/zones/${b.zone}/dns_records/${b.id}`, { method: 'PUT', body: JSON.stringify(bodyOf(b)) });
+    await addAudit(env, a.sess.user, 'dns.put', acct.name);
     return json({ ok: true, record: data.result });
   } catch (e) { return fail(e); }
 }
@@ -47,6 +50,7 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     await cfApi(acct, `/zones/${url.searchParams.get('zone')}/dns_records/${url.searchParams.get('id')}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'dns.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

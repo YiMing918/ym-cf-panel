@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // Email Routing: zone settings + rules + catch-all, account destination addresses.
 // Needs Zone → Email Routing Rules Edit (+ Account Email Routing Addresses for destinations).
@@ -42,6 +43,7 @@ export async function onRequestPost({ request, env }) {
     const acct = await resolveAccount(env, b.account);
     if (b.what === 'toggle') {
       await cfApi(acct, `/zones/${b.zone}/email/routing/${b.enabled ? 'enable' : 'disable'}`, { method: 'POST', body: '{}' });
+      await addAudit(env, a.sess.user, 'email.post', acct.name);
       return json({ ok: true });
     }
     if (b.what === 'catchall') {
@@ -55,6 +57,7 @@ export async function onRequestPost({ request, env }) {
           actions: b.forwardTo ? [{ type: 'forward', value: [String(b.forwardTo)] }] : (cur.actions || []),
         }),
       });
+      await addAudit(env, a.sess.user, 'email.post', acct.name);
       return json({ ok: true });
     }
     if (b.what === 'add-rule') {
@@ -69,6 +72,7 @@ export async function onRequestPost({ request, env }) {
           actions: [{ type: 'forward', value: [to] }],
         }),
       });
+      await addAudit(env, a.sess.user, 'email.post', acct.name);
       return json({ ok: true });
     }
     return json({ error: '未知操作' }, 400);
@@ -81,6 +85,7 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     await cfApi(acct, `/zones/${url.searchParams.get('zone')}/email/routing/rules/${url.searchParams.get('id')}`, { method: 'DELETE' });
+    await addAudit(env, a.sess.user, 'email.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }
 }

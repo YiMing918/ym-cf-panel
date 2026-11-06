@@ -126,7 +126,7 @@
   <p class="hint">令牌只保存在你自己的 KV 里、只在服务端使用，页面上永不回显。添加时会自动验证令牌是否有效。</p>
   <div id="acctList" style="margin-top:10px"></div>
   <div id="healthOut" style="margin-top:8px"></div>
-  <div class="btns"><button class="btn" id="acctAdd">＋ 添加账号</button><button class="btn ghost" id="healthBtn">🩺 令牌自检</button><button class="btn ghost" data-close>关闭</button></div>
+  <div class="btns"><button class="btn" id="acctAdd">＋ 添加账号</button><button class="btn ghost" id="healthBtn">🩺 令牌自检</button><button class="btn ghost" id="auditBtn">📜 操作日志</button><button class="btn ghost" data-close>关闭</button></div>
 </div></div>
 
 <!-- account editor -->
@@ -459,6 +459,7 @@ function renderDetail(id) {
       <div><div class="k">总请求</div><div class="v">${fmt(h.requests)}</div></div>
       <div><div class="k">总流量</div><div class="v">${fmtBytes(h.bytes)}</div></div></div>
       ${h.topCountries.map((c) => `<div class="cbar"><span class="n">${esc(c.name)}</span><span class="t"><i style="width:${(c.requests / maxC) * 100}%"></i></span><span class="v">${fmt(c.requests)}</span></div>`).join('') || '<p class="hint">暂无流量数据</p>'}`;
+    if (h.byZone && h.byZone.length > 1) html += `<div style="margin-top:10px"><b>按域名拆分</b>${tableHtml(['域名', '请求', '流量'], h.byZone.map((z) => `<tr><td>${esc(z.name)}</td><td>${fmt(z.requests)}</td><td>${fmtBytes(z.bytes)}</td></tr>`))}</div>`;
     if (h.cacheHitPct !== null && h.cacheHitPct !== undefined) html += `<p class="hint" style="margin-top:8px">缓存命中率 <b style="color:var(--text)">${h.cacheHitPct}%</b>（命中/过期/更新中的请求占比）</p>`;
     if (h.statusCodes && h.statusCodes.length) html += `<div style="margin-top:6px"><b>状态码分布</b><div class="chips" style="margin-top:6px">${h.statusCodes.map((s) => `<span class="chip2">${s.code} · ${fmt(s.requests)}</span>`).join('')}</div></div>`;
     if (h.topPaths && h.topPaths.length) {
@@ -649,10 +650,20 @@ async function refreshDnsList() {
   const box = $('#dnsList'); if (!box) return;
   try {
     const r = await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}`);
-    box.innerHTML = tableHtml(['类型', '名称', '内容', 'TTL', '代理', '操作'], r.records.map((x) => `<tr>
+    box.innerHTML = (r.records.length ? `<div class="btns" style="justify-content:flex-start"><button class="btn danger sm" id="dnsBatchDel">删除所选</button><span class="hint">勾选多条可批量删除</span></div>` : '')
+      + (tableHtml(['', '类型', '名称', '内容', 'TTL', '代理', '操作'], r.records.map((x) => `<tr>
+      <td><input type="checkbox" data-dns-check="${x.id}"></td>
       <td><b>${esc(x.type)}</b></td><td>${esc(x.name)}</td><td>${esc(x.content)}</td><td>${x.ttl === 1 ? '自动' : x.ttl}</td><td>${x.proxied ? '🟠 开' : '—'}</td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-dns-edit="${x.id}">编辑</button> <button class="btn danger sm" data-dns-del="${x.id}">删除</button></td></tr>`))
-      || '<p class="hint">暂无记录</p>';
+      || '<p class="hint">暂无记录</p>');
+    const bd = $('#dnsBatchDel');
+    if (bd) bd.addEventListener('click', () => arm(bd, async () => {
+      const ids = [...box.querySelectorAll('[data-dns-check]:checked')].map((c) => c.dataset.dnsCheck);
+      if (!ids.length) { toast('先勾选要删的记录'); return; }
+      let ok = 0;
+      for (const id of ids) { try { await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}&id=${id}`, { method: 'DELETE' }); ok++; } catch { /* keep going */ } }
+      toast(`已删除 ${ok}/${ids.length} 条`); refreshDnsList();
+    }));
     box.querySelectorAll('[data-dns-edit]').forEach((b) => b.addEventListener('click', () => {
       const rec = r.records.find((x) => x.id === b.dataset.dnsEdit); if (!rec) return;
       M.dnsEdit = rec.id;
@@ -752,6 +763,28 @@ async function loadKv() {
     try { await api(`/api/kvns?account=${M.acct.id}&ns=${M.ns}`, { method: 'DELETE' }); toast('命名空间已删除（刷新详情生效）'); }
     catch (err) { toast(err.message); }
   }));
+  // v3.1: bulk export / import of the current namespace
+  body.insertAdjacentHTML('beforeend', `<div style="margin-top:16px"><b>批量导入 / 导出（当前命名空间全部键）</b>
+  <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="kvExport">⬇ 导出全部（JSON）</button></div>
+  <label class="mlab">导入 JSON（格式：[{"name":"键","value":"值"}, ...]，同名键会被覆盖）</label>
+  <textarea class="minput" id="kvImportTxt" rows="4" placeholder='[{"name":"hello","value":"world"}]'></textarea>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="kvImportBtn">导入</button></div></div>`);
+  $('#kvExport').addEventListener('click', async () => {
+    try {
+      const r = await api(`/api/kvio?account=${M.acct.id}&ns=${M.ns}`);
+      const blob = new Blob([JSON.stringify(r.entries, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = 'kv-export.json'; link.click(); URL.revokeObjectURL(link.href);
+      toast(`已导出 ${r.total} 条`);
+    } catch (e) { toast(e.message); }
+  });
+  $('#kvImportBtn').addEventListener('click', (e) => arm(e.target, async () => {
+    try {
+      const entries = JSON.parse($('#kvImportTxt').value);
+      const r = await api('/api/kvio', { method: 'POST', body: JSON.stringify({ account: M.acct.id, ns: M.ns, entries }) });
+      toast(`已导入 ${r.written} 条`); refreshKvList(true);
+    } catch (err) { toast('导入失败：' + err.message); }
+  }));
   refreshKvList(true);
 }
 async function refreshKvList(reset) {
@@ -819,6 +852,17 @@ async function loadD1() {
   $('#dbDelete').addEventListener('click', (e) => arm(e.target, async () => {
     try { await api(`/api/d1admin?account=${M.acct.id}&db=${M.db}`, { method: 'DELETE' }); toast('数据库已删除（刷新详情生效）'); }
     catch (err) { toast(err.message); }
+  }));
+  // v3.1: Time Travel restore
+  body.insertAdjacentHTML('beforeend', `<div style="margin-top:16px"><b>⏪ 时间旅行恢复（Time Travel）</b>
+  <div class="warnbox">把当前数据库恢复到过去 30 天内的某个时间点。<b>恢复会覆盖当前数据</b>，执行前建议先导出一份 SQL。</div>
+  <div class="mrow"><div><label class="mlab">恢复到（UTC 时间，如 2026-11-01T12:00:00Z）</label><input class="minput" id="dbRestoreTs" placeholder="2026-11-01T12:00:00Z"></div>
+  <div><button class="btn danger sm" id="dbRestore">恢复到该时间点</button></div></div></div>`);
+  $('#dbRestore').addEventListener('click', (e) => arm(e.target, async () => {
+    try {
+      await api('/api/d1admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, action: 'restore', db: M.db, timestamp: $('#dbRestoreTs').value }) });
+      toast('恢复已完成');
+    } catch (err) { toast(err.message); }
   }));
   $('#sqlRun').addEventListener('click', async () => {
     const out = $('#sqlOut'); out.innerHTML = '<p class="hint"><span class="spin"></span> 执行中…</p>';
@@ -959,6 +1003,14 @@ $('#healthBtn')?.addEventListener('click', async () => {
     out.innerHTML = r.accounts.map((a) => `<div style="padding:8px 0;border-top:1px solid var(--line)"><b>${esc(a.name)}</b> <span class="tag">令牌 ${esc(a.tokenStatus)}</span><div class="chips" style="margin-top:4px">${Object.entries(a.probes).map(([k, v]) => `<span class="chip2">${v === 'ok' ? '✅' : '⚠️'} ${esc(k)}${v === 'ok' ? '' : '：' + esc(v)}</span>`).join('')}</div></div>`).join('') || '<p class="hint">还没有账号</p>';
   } catch (e) { out.innerHTML = mErr(e); }
 });
+$('#auditBtn')?.addEventListener('click', async () => {
+  const out = $('#healthOut');
+  out.innerHTML = '<p class="hint"><span class="spin"></span> 加载操作日志…</p>';
+  try {
+    const r = await api('/api/audit');
+    out.innerHTML = '<div style="margin-top:6px"><b>面板操作日志（最近 100 条）</b>' + (r.entries.length ? r.entries.map((e) => `<div style="padding:5px 0;border-top:1px solid var(--line)" class="small">${new Date(e.at).toLocaleString()} · ${esc(e.user)} · <span class="tag">${esc(e.action)}</span> ${esc(e.detail)}</div>`).join('') : '<p class="hint">暂无记录（在管理区做过的改动会记在这里）</p>') + '</div>';
+  } catch (e) { out.innerHTML = mErr(e); }
+});
 const themeSel = $('#setTheme');
 if (themeSel) {
   themeSel.value = localStorage.getItem('ymcfp_theme') || 'auto';
@@ -1001,8 +1053,26 @@ async function loadZoneset() {
   try {
     const c = await api(`/api/certs?account=${M.acct.id}&zone=${M.zone}`);
     $('#certBody').innerHTML = `<div style="margin-top:14px"><b>SSL 证书</b>
-    ${c.universal ? `<p class="hint">通用 SSL（免费证书）：${c.universal.enabled ? '已开启' : '未开启'}</p>` : `<p class="hint">证书状态读取失败${c.universalError ? '：' + esc(c.universalError) : ''}（令牌可能缺 SSL 证书权限）</p>`}
-    ${c.packs.map((p) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="tag">${esc(p.status)}</span> ${p.hosts.map(esc).join('、')}<span class="hint"> · ${esc(p.issuer || '')}${p.expires ? ' · 到期 ' + esc(String(p.expires).slice(0, 10)) : ''}</span></div>`).join('')}</div>`;
+    ${c.universal ? `<p class="hint">通用 SSL（免费证书）：${c.universal.enabled ? '已开启' : '未开启'} <button class="btn ghost sm" id="uniToggle">${c.universal.enabled ? '关闭' : '开启'}</button></p>` : `<p class="hint">证书状态读取失败${c.universalError ? '：' + esc(c.universalError) : ''}（令牌可能缺 SSL 证书权限）</p>`}
+    ${c.packs.map((p) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="tag">${esc(p.status)}</span> ${p.hosts.map(esc).join('、')}<span class="hint"> · ${esc(p.issuer || '')}${p.expires ? ' · 到期 ' + esc(String(p.expires).slice(0, 10)) : ''}</span></div>`).join('')}
+    ${c.custom && c.custom.length ? `<div style="margin-top:8px"><b>自定义证书</b>${c.custom.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${x.hosts.map(esc).join('、')}<span class="hint"> · ${esc(x.issuer || '')}${x.expires ? ' · 到期 ' + esc(String(x.expires).slice(0, 10)) : ''}</span></span><button class="btn danger sm" data-cert-del="${x.id}">删除</button></div>`).join('')}</div>` : ''}
+    <div style="margin-top:10px"><b>上传自定义证书</b>
+    <label class="mlab">证书（PEM，需含完整链）</label><textarea class="minput" id="certPem" rows="3" placeholder="-----BEGIN CERTIFICATE-----"></textarea>
+    <label class="mlab">私钥（PEM；只转发给 Cloudflare，面板不保存）</label><textarea class="minput" id="certKey" rows="3" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+    <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="certUpload">上传证书</button></div></div>`;
+    const uni = $('#uniToggle');
+    if (uni) uni.addEventListener('click', async () => {
+      try { await api('/api/certs', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'universal', enabled: !c.universal.enabled }) }); toast('通用 SSL 已更新'); loadZoneset(); }
+      catch (e) { toast(e.message); }
+    });
+    $$('#certBody [data-cert-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/certs?account=${M.acct.id}&zone=${M.zone}&id=${b.dataset.certDel}`, { method: 'DELETE' }); toast('自定义证书已删除'); loadZoneset(); }
+      catch (e) { toast(e.message); }
+    })));
+    $('#certUpload').addEventListener('click', async () => {
+      try { await api('/api/certs', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, certificate: $('#certPem').value, privateKey: $('#certKey').value }) }); toast('证书已上传'); loadZoneset(); }
+      catch (e) { toast(e.message); }
+    });
   } catch { /* certs optional */ }
 }
 
@@ -1030,12 +1100,41 @@ async function loadRules() {
   });
   try {
     const r = await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}`);
-    $('#rlSets').innerHTML = r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label></div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>';
+    const waf = r.rulesets.find((x) => x.phase === 'http_request_firewall_custom');
+    const ruleForm = `<div style="margin-top:14px"><b id="wafFormTitle">${waf ? '新建 WAF 自定义规则' : '创建 WAF 规则集 + 第一条规则'}</b>
+    <div class="mrow"><div><label class="mlab">规则名/描述</label><input class="minput" id="wafDesc" placeholder="如：拦截扫描器"></div>
+    <div><label class="mlab">动作</label><select class="minput" id="wafAction"><option value="block">拦截 block</option><option value="managed_challenge">托管质询</option><option value="js_challenge">JS 质询</option><option value="challenge">质询 challenge</option><option value="log">只记录 log</option></select></div></div>
+    <label class="mlab">表达式（Cloudflare 规则表达式语法）</label><input class="minput" id="wafExpr" placeholder='如 (http.user_agent contains "sqlmap") 或 (ip.src in {1.2.3.4})'>
+    <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="wafSave">保存规则</button><button class="btn ghost sm" id="wafCancelEdit" style="display:none">取消编辑</button></div>
+    <p class="hint">先拿不准就用「只记录 log」试跑，确认命中再改成拦截。删除规则要点两次确认。</p></div>`;
+    $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
     $$('#rlSets [data-rule-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       const [rs, rule] = cb.dataset.ruleToggle.split('|');
       try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle-rule', ruleset: rs, rule, enabled: cb.checked }) }); toast('规则已更新'); }
       catch (e) { toast(e.message); loadRules(); }
     }));
+    let editing = null;
+    $$('#rlSets [data-rule-edit]').forEach((b) => b.addEventListener('click', () => {
+      const [rs, rule] = b.dataset.ruleEdit.split('|');
+      editing = { rs, rule };
+      $('#wafDesc').value = b.dataset.ruleDesc; $('#wafExpr').value = b.dataset.ruleExpr; $('#wafAction').value = b.dataset.ruleAction;
+      $('#wafFormTitle').textContent = '编辑 WAF 规则'; $('#wafCancelEdit').style.display = '';
+    }));
+    $$('#rlSets [data-rule-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      const [rs, rule] = b.dataset.ruleDel.split('|');
+      try { await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}&what=rule&ruleset=${rs}&rule=${rule}`, { method: 'DELETE' }); toast('规则已删除'); loadRules(); }
+      catch (e) { toast(e.message); }
+    })));
+    $('#wafCancelEdit').addEventListener('click', () => loadRules());
+    $('#wafSave').addEventListener('click', async () => {
+      const payload = { account: M.acct.id, zone: M.zone, description: $('#wafDesc').value, expression: $('#wafExpr').value, action: $('#wafAction').value };
+      try {
+        if (editing) await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'rule-edit', ruleset: editing.rs, rule: editing.rule }) });
+        else if (waf) await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'rule-create', ruleset: waf.id }) });
+        else await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'ruleset-create' }) });
+        toast('规则已保存'); loadRules();
+      } catch (e) { toast(e.message); }
+    });
   } catch (e) { $('#rlSets').innerHTML = mErr(e); }
   refreshPrList();
 }
@@ -1152,6 +1251,383 @@ async function loadTnDetail(id) {
         await api('/api/tunnels', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'route', tunnel: id, zone: document.getElementById('routeZone-' + id).value, hostname: document.getElementById('routeHost-' + id).value }) });
         toast('CNAME 已生成');
       } catch (e) { toast(e.message); }
+    });
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+</script>
+<script>
+/* ================= v4: account admin + products + workers code + R2 objects ================= */
+const LOADERS4 = { account: loadAccount, products: loadProducts };
+const _imOrig = initManage;
+initManage = function (acct, inv) {
+  _imOrig(acct, inv);
+  const nav = $('#mTabs'); if (!nav) return;
+  for (const [id, label] of [['account', '👤 账号'], ['products', '🧩 产品']]) {
+    const b = document.createElement('button');
+    b.dataset.mtab = id; b.textContent = label;
+    b.addEventListener('click', () => {
+      $$('#mTabs button').forEach((x) => x.classList.toggle('on', x === b));
+      M.tab = id;
+      const body = $('#mBody'); body.innerHTML = '<p class="hint"><span class="spin"></span> 加载中…</p>';
+      LOADERS4[id]();
+    });
+    nav.appendChild(b);
+  }
+};
+const zoneOpts = (selId, cur) => `<select class="minput" id="${selId}">${(M.acct.zones || []).map((z) => `<option value="${z.id}" ${z.id === cur ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select>`;
+
+/* ---------- 账号 tab ---------- */
+async function loadAccount() {
+  const body = $('#mBody');
+  body.innerHTML = `<b>账号</b><p class="hint">账号名 ${esc(M.acct.name)}</p>
+  <div class="mrow"><div><label class="mlab">改个新名字</label><input class="minput" id="acRename" placeholder="新账号名"></div><div><button class="btn sm" id="acRenameBtn">改名</button></div></div>
+  <div style="margin-top:16px"><b>成员</b><div id="acMembers"><p class="hint"><span class="spin"></span> 加载成员…</p></div>
+  <div class="mrow"><div><label class="mlab">邀请成员（邮箱）</label><input class="minput" id="acInviteEmail" placeholder="someone@example.com"></div></div>
+  <div id="acRoles" class="chips"></div>
+  <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="acInviteBtn">发送邀请</button></div>
+  <p class="hint">超级管理员这类高权限角色请谨慎勾选。</p></div>
+  <div style="margin-top:16px"><b>账单资料</b><div id="acBilling"><button class="btn ghost sm" id="acBillingBtn">查看账单资料</button></div></div>
+  <div style="margin-top:16px"><b>Cloudflare 官方审计日志</b><div id="acAudit"><button class="btn ghost sm" id="acAuditBtn">加载最近 50 条</button></div></div>
+  <div style="margin-top:16px"><b>Web Analytics 站点</b><div id="acRum"><button class="btn ghost sm" id="acRumBtn">查看站点</button></div></div>
+  <div style="margin-top:16px"><b>账号 API 令牌</b><p class="hint">账号级令牌（和你现在登录面板用的用户令牌是两套）。新建的令牌值只显示一次。</p><div id="acTokens"><p class="hint"><span class="spin"></span> 加载令牌…</p></div>
+  <div class="mrow"><div><label class="mlab">新建令牌名</label><input class="minput" id="acTokName" placeholder="如 给 CI 用"></div></div>
+  <input class="minput" id="acGroupSearch" placeholder="🔍 搜索权限组（如 D1、DNS、Workers）">
+  <div id="acGroups" style="max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:6px"><p class="hint">点下面按钮加载权限组</p></div>
+  <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="acGroupsBtn">加载权限组</button><button class="btn sm" id="acTokCreate">创建令牌</button></div>
+  <div id="acTokValue"></div></div>`;
+  $('#acRenameBtn').addEventListener('click', async () => {
+    try { await api('/api/accountadmin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'rename', name: $('#acRename').value }) }); toast('已改名，下次打开详情生效'); }
+    catch (e) { toast(e.message); }
+  });
+  await loadMembers();
+  $('#acBillingBtn').addEventListener('click', async () => {
+    const box = $('#acBilling');
+    try {
+      const r = await api(`/api/accountadmin?account=${M.acct.id}&what=billing`);
+      const p = r.profile || {};
+      box.innerHTML = `<p class="hint">姓名 ${esc(p.name || '—')} · 公司 ${esc(p.company || '—')} · 国家/地区 ${esc(p.country || '—')}</p><p class="hint">Cloudflare 的账单明细（发票、订阅）在官方后台「账单」页最全；这里只能读到账单资料。</p>`;
+    } catch (e) { box.innerHTML = mErr(e); }
+  });
+  $('#acAuditBtn').addEventListener('click', async () => {
+    const box = $('#acAudit'); box.innerHTML = '<p class="hint"><span class="spin"></span> 加载中…</p>';
+    try {
+      const r = await api(`/api/accountadmin?account=${M.acct.id}&what=auditlog`);
+      box.innerHTML = r.entries.length ? r.entries.map((x) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)" class="small">${esc(String(x.at || '').slice(0, 16).replace('T', ' '))} · ${esc(x.actor)} · <span class="tag">${esc(x.action)}</span> ${esc(x.resource)} <span class="muted">${esc(x.ip || '')}</span></div>`).join('') : '<p class="hint">暂无记录</p>';
+    } catch (e) { box.innerHTML = mErr(e); }
+  });
+  $('#acRumBtn').addEventListener('click', async () => {
+    const box = $('#acRum'); box.innerHTML = '<p class="hint"><span class="spin"></span> 加载中…</p>';
+    try {
+      const r = await api(`/api/accountadmin?account=${M.acct.id}&what=rum`);
+      box.innerHTML = r.sites.length ? r.sites.map((s) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)">📊 ${esc(s.name)} <span class="hint">自动安装 ${s.autoInstall ? '开' : '关'}</span></div>`).join('') : '<p class="hint">暂无 Web Analytics 站点</p>';
+    } catch (e) { box.innerHTML = mErr(e); }
+  });
+  await loadAcctTokens();
+}
+async function loadMembers() {
+  const box = $('#acMembers'); if (!box) return;
+  try {
+    const r = await api(`/api/accountadmin?account=${M.acct.id}&what=members`);
+    M.roles = r.roles || [];
+    box.innerHTML = r.members.length ? r.members.map((m) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">👤 ${esc(m.email)} <span class="tag">${esc(m.status)}</span><br><span class="small muted">${m.roles.map((x) => esc(x.name)).join('、')}</span></span><button class="btn danger sm" data-member-del="${m.id}">移除</button></div>`).join('') : '<p class="hint">暂无成员</p>';
+    $$('#acMembers [data-member-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/accountadmin?account=${M.acct.id}&member=${b.dataset.memberDel}`, { method: 'DELETE' }); toast('成员已移除'); loadMembers(); }
+      catch (e) { toast(e.message); }
+    })));
+    $('#acRoles').innerHTML = M.roles.map((role) => `<label class="chip2" style="cursor:pointer"><input type="checkbox" data-role="${role.id}"> ${esc(role.name)}</label>`).join('') || '<span class="hint">角色列表读不到（缺成员权限）</span>';
+    $('#acInviteBtn').onclick = async () => {
+      const roleIds = $$('#acRoles [data-role]:checked').map((c) => c.dataset.role);
+      try { await api('/api/accountadmin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'invite', email: $('#acInviteEmail').value, roleIds }) }); toast('邀请已发送'); loadMembers(); }
+      catch (e) { toast(e.message); }
+    };
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadAcctTokens() {
+  const box = $('#acTokens'); if (!box) return;
+  try {
+    const r = await api(`/api/accttokens?account=${M.acct.id}`);
+    box.innerHTML = r.tokens.length ? r.tokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)} <span class="tag">${esc(t.status)}</span><br><span class="small muted">创建 ${esc(String(t.issued || '').slice(0, 10))}${t.lastUsed ? ' · 最近使用 ' + esc(String(t.lastUsed).slice(0, 10)) : ''} · ${t.policies} 条策略</span></span><button class="btn danger sm" data-tok-del="${t.id}">删除</button></div>`).join('') : '<p class="hint">暂无账号级令牌</p>';
+    $$('#acTokens [data-tok-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/accttokens?account=${M.acct.id}&id=${b.dataset.tokDel}`, { method: 'DELETE' }); toast('令牌已删除'); loadAcctTokens(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+  $('#acGroupsBtn').onclick = async () => {
+    const g = $('#acGroups'); g.innerHTML = '<p class="hint"><span class="spin"></span> 加载权限组…</p>';
+    try {
+      const r = await api(`/api/accttokens?account=${M.acct.id}&what=groups`);
+      M.groups = r.groups;
+      const render = (q) => { g.innerHTML = r.groups.filter((x) => !q || x.name.toLowerCase().includes(q)).map((x) => `<label style="display:block;padding:3px 0" class="small"><input type="checkbox" data-group="${x.id}"> ${esc(x.name)}</label>`).join('') || '<p class="hint">没有匹配的权限组</p>'; };
+      render('');
+      $('#acGroupSearch').oninput = (e) => render(e.target.value.trim().toLowerCase());
+    } catch (e) { g.innerHTML = mErr(e); }
+  };
+  $('#acTokCreate').onclick = async () => {
+    const groupIds = $$('#acGroups [data-group]:checked').map((c) => c.dataset.group);
+    try {
+      const r = await api('/api/accttokens', { method: 'POST', body: JSON.stringify({ account: M.acct.id, name: $('#acTokName').value, groupIds }) });
+      $('#acTokValue').innerHTML = `<div class="warnbox">令牌已创建，值只显示这一次，请立刻保存：<br><code style="word-break:break-all">${esc(r.value || '')}</code></div>`;
+      loadAcctTokens();
+    } catch (e) { toast(e.message); }
+  };
+}
+
+/* ---------- 产品 tab ---------- */
+async function loadProducts() {
+  const body = $('#mBody');
+  body.innerHTML = `<b>Zero Trust · Access</b><div id="pdAccess"><p class="hint"><span class="spin"></span> 加载 Access…</p></div>
+  <div style="margin-top:18px"><b>Queues 队列</b><div id="pdQueues"><p class="hint"><span class="spin"></span> 加载队列…</p></div>
+  <div class="mrow"><div><label class="mlab">新建队列名</label><input class="minput" id="qName" placeholder="如 jobs"></div><div><button class="btn sm" id="qCreate">新建队列</button></div></div></div>
+  <div style="margin-top:18px"><b>负载均衡</b><div class="mrow"><div><label class="mlab">域名</label>${zoneOpts('lbZone', M.zone)}</div></div><div id="pdLb"><p class="hint"><span class="spin"></span> 加载中…</p></div></div>
+  <div style="margin-top:18px"><b>注册商域名（在 CF 买的域名）</b><div id="pdReg"><p class="hint"><span class="spin"></span> 加载中…</p></div></div>
+  <div style="margin-top:18px"><b>Stream 视频</b><div id="pdStream"><p class="hint"><span class="spin"></span> 加载中…</p></div></div>
+  <div style="margin-top:18px"><b>Images 图片</b><div id="pdImages"><p class="hint"><span class="spin"></span> 加载中…</p></div></div>`;
+  $('#qCreate').addEventListener('click', async () => {
+    try { await api('/api/queues', { method: 'POST', body: JSON.stringify({ account: M.acct.id, name: $('#qName').value }) }); toast('队列已创建'); loadQueues(); }
+    catch (e) { toast(e.message); }
+  });
+  $('#lbZone').addEventListener('change', (e) => loadLb(e.target.value));
+  loadAccess(); loadQueues(); loadLb($('#lbZone').value); loadRegistrar(); loadStream(); loadImages();
+}
+async function loadAccess() {
+  const box = $('#pdAccess'); if (!box) return;
+  try {
+    const r = await api(`/api/access?account=${M.acct.id}`);
+    box.innerHTML = (r.apps.length ? r.apps.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛡 ${esc(x.name)}<br><span class="small muted">${esc(x.domain)} · ${esc(x.type)}${x.policies.length ? ' · 策略 ' + x.policies.map(esc).join('、') : ''}</span></span><button class="btn danger sm" data-app-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无 Access 应用</p>')
+      + `<div class="mrow"><div><label class="mlab">新应用名</label><input class="minput" id="accAppName" placeholder="如 内部后台"></div><div><label class="mlab">域名</label><input class="minput" id="accAppDomain" placeholder="admin.example.com"></div><div><label class="mlab">允许登录的邮箱（逗号分隔）</label><input class="minput" id="accAppEmails" placeholder="me@example.com"></div><div><button class="btn sm" id="accAppCreate">新建应用</button></div></div>`
+      + `<div style="margin-top:10px"><b>服务令牌</b>${r.serviceTokens.length ? r.serviceTokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)}<br><span class="small muted">Client ID ${esc(t.clientId)}</span></span><button class="btn danger sm" data-svc-del="${t.id}">删除</button></div>`).join('') : '<p class="hint">暂无服务令牌</p>'}
+      <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="svcCreate">新建服务令牌</button></div><div id="svcValue"></div></div>`;
+    $$('#pdAccess [data-app-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/access?account=${M.acct.id}&kind=app&id=${b.dataset.appDel}`, { method: 'DELETE' }); toast('应用已删除'); loadAccess(); }
+      catch (e) { toast(e.message); }
+    })));
+    $$('#pdAccess [data-svc-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/access?account=${M.acct.id}&kind=svctoken&id=${b.dataset.svcDel}`, { method: 'DELETE' }); toast('服务令牌已删除'); loadAccess(); }
+      catch (e) { toast(e.message); }
+    })));
+    $('#accAppCreate').addEventListener('click', async () => {
+      try { await api('/api/access', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'app-create', name: $('#accAppName').value, domain: $('#accAppDomain').value, emails: $('#accAppEmails').value }) }); toast('Access 应用已创建'); loadAccess(); }
+      catch (e) { toast(e.message); }
+    });
+    $('#svcCreate').addEventListener('click', async () => {
+      try {
+        const r2 = await api('/api/access', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'svctoken-create', name: 'panel-' + Date.now() }) });
+        $('#svcValue').innerHTML = `<div class="warnbox">服务令牌只显示这一次：<br>Client ID <code>${esc(r2.clientId || '')}</code><br>Client Secret <code style="word-break:break-all">${esc(r2.clientSecret || '')}</code></div>`;
+        loadAccess();
+      } catch (e) { toast(e.message); }
+    });
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadQueues() {
+  const box = $('#pdQueues'); if (!box) return;
+  try {
+    const r = await api(`/api/queues?account=${M.acct.id}`);
+    box.innerHTML = r.queues.length ? r.queues.map((q) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">📬 ${esc(q.name)}<span class="hint"> · 生产者 ${q.producers ?? '—'} · 消费者 ${q.consumers ?? '—'}</span></span><button class="btn danger sm" data-q-del="${q.id}">删除</button></div>`).join('') : '<p class="hint">暂无队列</p>';
+    $$('#pdQueues [data-q-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/queues?account=${M.acct.id}&id=${b.dataset.qDel}`, { method: 'DELETE' }); toast('队列已删除'); loadQueues(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadLb(zone) {
+  const box = $('#pdLb'); if (!box) return;
+  try {
+    const r = await api(`/api/loadbalancers?account=${M.acct.id}&zone=${zone}`);
+    box.innerHTML = (r.lbs.length ? r.lbs.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">⚖️ ${esc(x.name)} <span class="tag">${x.enabled ? '启用' : '停用'}</span><span class="hint"> · ${x.pools} 个源池</span></span><button class="btn ghost sm" data-lb-toggle="${x.id}|${x.enabled ? 0 : 1}">${x.enabled ? '停用' : '启用'}</button><button class="btn danger sm" data-lb-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">这个域名下暂无负载均衡</p>')
+      + (r.pools.length ? `<p class="hint" style="margin-top:6px">源池：${r.pools.map((p) => esc(p.name) + '（' + p.origins + ' 个源）').join('、')}</p>` : '')
+      + (r.monitors.length ? `<p class="hint">健康检查：${r.monitors.map((m) => esc(m.type) + ' ' + esc(m.path)).join('、')}</p>` : '');
+    $$('#pdLb [data-lb-toggle]').forEach((b) => b.addEventListener('click', async () => {
+      const [id, on] = b.dataset.lbToggle.split('|');
+      try { await api('/api/loadbalancers', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone, what: 'toggle', id, enabled: on === '1' }) }); toast('已更新'); loadLb(zone); }
+      catch (e) { toast(e.message); }
+    }));
+    $$('#pdLb [data-lb-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/loadbalancers?account=${M.acct.id}&zone=${zone}&id=${b.dataset.lbDel}`, { method: 'DELETE' }); toast('已删除'); loadLb(zone); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadRegistrar() {
+  const box = $('#pdReg'); if (!box) return;
+  try {
+    const r = await api(`/api/registrar?account=${M.acct.id}`);
+    box.innerHTML = r.domains.length ? r.domains.map((d) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🌐 ${esc(d.name)}<span class="hint"> · 到期 ${esc(String(d.expires || '').slice(0, 10))} · 隐私保护 ${d.privacy ? '开' : '关'}</span></span><label class="small"><input type="checkbox" data-reg="${esc(d.name)}|auto" ${d.autoRenew ? 'checked' : ''}> 自动续费</label><label class="small"><input type="checkbox" data-reg="${esc(d.name)}|lock" ${d.locked ? 'checked' : ''}> 转移锁</label></div>`).join('') : '<p class="hint">这个账号没有在 Cloudflare 注册的域名</p>';
+    $$('#pdReg [data-reg]').forEach((cb) => cb.addEventListener('change', async () => {
+      const [domain, kind] = cb.dataset.reg.split('|');
+      const payload = { account: M.acct.id, domain };
+      if (kind === 'auto') payload.autoRenew = cb.checked; else payload.locked = cb.checked;
+      try { await api('/api/registrar', { method: 'POST', body: JSON.stringify(payload) }); toast('已更新'); }
+      catch (e) { toast(e.message); loadRegistrar(); }
+    }));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadStream() {
+  const box = $('#pdStream'); if (!box) return;
+  try {
+    const r = await api(`/api/stream?account=${M.acct.id}`);
+    box.innerHTML = r.videos.length ? r.videos.map((v) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🎬 ${esc(v.name)} <span class="tag">${esc(v.state || '')}</span><span class="hint"> · ${Math.round(v.duration || 0)}s · ${fmtBytes(v.size || 0)}</span></span>${v.hls ? `<a href="${esc(v.hls)}" target="_blank" rel="noopener">播放链接</a>` : ''}<button class="btn danger sm" data-vid-del="${v.uid}">删除</button></div>`).join('') : '<p class="hint">暂无视频（Stream 是付费产品，没开通时这里为空）</p>';
+    $$('#pdStream [data-vid-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/stream?account=${M.acct.id}&uid=${b.dataset.vidDel}`, { method: 'DELETE' }); toast('视频已删除'); loadStream(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadImages() {
+  const box = $('#pdImages'); if (!box) return;
+  try {
+    const r = await api(`/api/images?account=${M.acct.id}`);
+    box.innerHTML = (r.stats ? `<p class="hint">已存图片 ${r.stats.count} 张</p>` : '')
+      + (r.images.length ? r.images.map((im) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🖼 ${esc(im.filename || im.id)}<span class="hint"> · ${esc(String(im.uploaded || '').slice(0, 10))}</span></span>${im.firstVariant ? `<a href="${esc(im.firstVariant)}" target="_blank" rel="noopener">打开</a>` : ''}<button class="btn danger sm" data-img-del="${im.id}">删除</button></div>`).join('') : '<p class="hint">暂无图片（Images 是付费产品）</p>');
+    $$('#pdImages [data-img-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/images?account=${M.acct.id}&id=${b.dataset.imgDel}`, { method: 'DELETE' }); toast('图片已删除'); loadImages(); }
+      catch (e) { toast(e.message); }
+    })));
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+</script>
+<script>
+/* ================= v4: Workers 代码/路由/日志 + R2 文件浏览 ================= */
+const _lwiOrig = loadWorkersInfo;
+loadWorkersInfo = async function () { await _lwiOrig(); renderWkAdv(); };
+function renderWkAdv() {
+  const box = $('#wkInfo'); if (!box || !M.script || $('#wkAdv')) return;
+  box.insertAdjacentHTML('beforeend', `<div id="wkAdv" style="margin-top:12px">
+  <div class="btns" style="justify-content:flex-start">
+    <button class="btn ghost sm" id="wkCodeView">📄 查看代码</button>
+    <button class="btn ghost sm" id="wkTail">📡 日志快照（7 秒）</button>
+    <button class="btn ghost sm" id="wkSubOn">开启 workers.dev</button>
+    <button class="btn ghost sm" id="wkSubOff">关闭 workers.dev</button>
+    <button class="btn danger sm" id="wkDelete">删除脚本</button>
+  </div>
+  <div id="wkCodeOut"></div>
+  <div style="margin-top:10px"><b>上传新代码</b>
+  <textarea class="minput" id="wkCodeTxt" rows="8" placeholder="把新的 Worker 代码粘贴到这里（部署时会自动保留现有绑定）"></textarea>
+  <div class="btns" style="justify-content:flex-start"><label class="small"><input type="checkbox" id="wkModule"> ES 模块格式（export default）</label><button class="btn sm" id="wkUpload">上传并部署</button></div></div>
+  <div style="margin-top:10px"><b>域名路由（Workers Routes）</b>
+  <div class="mrow"><div><label class="mlab">域名</label>${zoneOpts('wkRouteZone', M.zone)}</div>
+  <div><label class="mlab">路由（如 example.com/api/*）</label><input class="minput" id="wkRoutePattern" placeholder="sub.example.com/path/*"></div>
+  <div><button class="btn sm" id="wkRouteAdd">把当前脚本挂上去</button></div></div>
+  <div id="wkRoutes"></div></div></div>`);
+  $('#wkCodeView').addEventListener('click', async () => {
+    const out = $('#wkCodeOut'); out.innerHTML = '<p class="hint"><span class="spin"></span> 读取代码…</p>';
+    try {
+      const r = await api(`/api/workerscode?account=${M.acct.id}&script=${encodeURIComponent(M.script)}`);
+      out.innerHTML = r.parts.map((p) => `<div style="margin-top:8px"><b>${esc(p.name)}</b> <span class="hint">${fmtBytes(p.size)}</span><pre style="white-space:pre-wrap;word-break:break-all;background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto" class="small">${esc(p.text)}</pre></div>`).join('') + (r.truncated ? '<p class="hint">代码较长，只显示了前 60K 字符。</p>' : '');
+    } catch (e) { out.innerHTML = mErr(e); }
+  });
+  $('#wkTail').addEventListener('click', async (e) => {
+    const btn = e.target; btn.disabled = true; btn.textContent = '📡 正在监听 7 秒，去访问这个 Worker…';
+    const out = $('#wkCodeOut');
+    try {
+      const r = await api('/api/workerstail', { method: 'POST', body: JSON.stringify({ account: M.acct.id, script: M.script }) });
+      out.innerHTML = `<p class="hint">${esc(r.note || '')}</p>` + (r.events.length ? r.events.map((ev) => `<div style="padding:5px 0;border-bottom:1px solid var(--line)" class="small">${new Date(ev.at).toLocaleTimeString()} · <span class="tag">${esc(ev.outcome)}</span> ${esc(ev.url || '')}${ev.logs && ev.logs.length ? '<br>' + ev.logs.map(esc).join('<br>') : ''}${ev.exc && ev.exc.length ? '<br>⚠️ ' + ev.exc.map(esc).join('；') : ''}</div>`).join('') : '<p class="hint">这 7 秒里没有请求进来。</p>');
+    } catch (err) { out.innerHTML = mErr(err); }
+    btn.disabled = false; btn.textContent = '📡 日志快照（7 秒）';
+  });
+  const sub = async (on) => {
+    try { await api('/api/workerscode', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'subdomain', script: M.script, enabled: on }) }); toast('workers.dev 子域名已' + (on ? '开启' : '关闭')); }
+    catch (e) { toast(e.message); }
+  };
+  $('#wkSubOn').addEventListener('click', () => sub(true));
+  $('#wkSubOff').addEventListener('click', () => sub(false));
+  $('#wkDelete').addEventListener('click', (e) => arm(e.target, async () => {
+    try { await api(`/api/workerscode?account=${M.acct.id}&script=${encodeURIComponent(M.script)}`, { method: 'DELETE' }); toast('脚本已删除（刷新详情生效）'); }
+    catch (err) { toast(err.message); }
+  }));
+  $('#wkUpload').addEventListener('click', (e) => arm(e.target, async () => {
+    try { await api('/api/workerscode', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'upload', script: M.script, code: $('#wkCodeTxt').value, module: $('#wkModule').checked }) }); toast('新代码已部署'); }
+    catch (err) { toast(err.message); }
+  }));
+  const loadRoutes = async () => {
+    const rb = $('#wkRoutes'); if (!rb) return;
+    try {
+      const r = await api(`/api/workerscode?account=${M.acct.id}&what=routes&zone=${$('#wkRouteZone').value}`);
+      rb.innerHTML = r.routes.length ? r.routes.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛣 ${esc(x.pattern)} <span class="hint">→ ${esc(x.script)}</span></span><button class="btn danger sm" data-route-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">这个域名暂无路由</p>';
+      $$('#wkRoutes [data-route-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+        try { await api(`/api/workerscode?account=${M.acct.id}&kind=route&zone=${$('#wkRouteZone').value}&id=${b.dataset.routeDel}`, { method: 'DELETE' }); toast('路由已删除'); loadRoutes(); }
+        catch (err) { toast(err.message); }
+      })));
+    } catch (err) { rb.innerHTML = mErr(err); }
+  };
+  $('#wkRouteZone').addEventListener('change', loadRoutes);
+  $('#wkRouteAdd').addEventListener('click', async () => {
+    try { await api('/api/workerscode', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'route', zone: $('#wkRouteZone').value, pattern: $('#wkRoutePattern').value, script: M.script }) }); toast('路由已添加'); loadRoutes(); }
+    catch (e) { toast(e.message); }
+  });
+  loadRoutes();
+}
+
+/* ---- R2 对象浏览（S3） ---- */
+const _ldOrig = loadDeploy;
+loadDeploy = async function () { await _ldOrig(); renderR2Objects(); };
+function renderR2Objects() {
+  const list = $('#r2List'); if (!list || $('#r2Obj')) return;
+  $$('#r2List [data-r2-del]').forEach(() => {});
+  list.querySelectorAll('div').forEach(() => {});
+  const rows = list.children;
+  // add a 文件 button next to each bucket row
+  (M.inv.buckets || []).forEach((b, i) => {
+    const row = rows[i]; if (!row) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn ghost sm'; btn.textContent = '📁 文件';
+    btn.addEventListener('click', () => { M.r2bucket = b.name; M.r2prefix = ''; loadR2Objects(); });
+    row.insertBefore(btn, row.lastChild);
+  });
+  const hint = list.nextElementSibling;
+  if (hint) hint.textContent = '点「文件」浏览桶内对象；查改文件走 S3 密钥（在下方保存，存于面板服务端，不外传）。';
+  list.insertAdjacentHTML('afterend', `<div id="r2Obj" style="margin-top:12px"></div>`);
+  renderR2Cred();
+}
+async function renderR2Cred() {
+  const box = $('#r2Obj'); if (!box) return;
+  try {
+    const r = await api(`/api/r2objects?account=${M.acct.id}&what=cred`);
+    box.innerHTML = `<b>R2 文件（S3 密钥）</b>
+    ${r.configured ? `<p class="hint">✅ 已保存 S3 密钥（尾号 ${esc(r.akLast4)}）<button class="btn ghost sm" id="r2CredClear">清除</button></p><p class="hint">${M.r2bucket ? '当前桶：' + esc(M.r2bucket) : '在上面某个桶点「文件」开始浏览。'}</p><div id="r2Files"></div>`
+      : `<p class="hint">还没保存。在 CF 后台 R2 页右上角「管理 R2 API 令牌」建一个 Object Read & Write 令牌，把 Access Key ID 和 Secret 填这里（只存面板服务端）。</p>
+      <div class="mrow"><div><label class="mlab">Access Key ID</label><input class="minput" id="r2Ak"></div><div><label class="mlab">Secret Access Key</label><input class="minput" id="r2Sk" type="password"></div><div><button class="btn sm" id="r2CredSave">保存密钥</button></div></div><div id="r2Files"></div>`}`;
+    const save = $('#r2CredSave');
+    if (save) save.addEventListener('click', async () => {
+      try { await api('/api/r2objects', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'setcred', ak: $('#r2Ak').value, sk: $('#r2Sk').value }) }); toast('密钥已保存'); renderR2Cred(); }
+      catch (e) { toast(e.message); }
+    });
+    const clear = $('#r2CredClear');
+    if (clear) clear.addEventListener('click', (e) => arm(e.target, async () => {
+      try { await api('/api/r2objects', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'setcred', clear: true }) }); toast('密钥已清除'); renderR2Cred(); }
+      catch (err) { toast(err.message); }
+    }));
+    if (M.r2bucket) loadR2Objects();
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+async function loadR2Objects() {
+  const box = $('#r2Files'); if (!box) return;
+  box.innerHTML = '<p class="hint"><span class="spin"></span> 读取对象…</p>';
+  try {
+    const r = await api(`/api/r2objects?account=${M.acct.id}&bucket=${encodeURIComponent(M.r2bucket)}&prefix=${encodeURIComponent(M.r2prefix || '')}`);
+    const crumbs = `<div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="r2Root">🏠 根目录</button>${M.r2prefix ? `<button class="btn ghost sm" id="r2Up">⬆ 上一级</button><span class="hint">当前：${esc(M.r2prefix)}</span>` : ''}</div>`;
+    box.innerHTML = crumbs
+      + (r.folders || []).map((f) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><a href="#" data-r2-folder="${esc(f)}">📁 ${esc(f.slice((M.r2prefix || '').length))}</a></div>`).join('')
+      + (r.objects || []).map((o) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">📄 ${esc(o.key.slice((M.r2prefix || '').length))}<span class="hint"> · ${fmtBytes(o.size)} · ${esc(String(o.modified || '').slice(0, 10))}</span></span><button class="btn ghost sm" data-r2-dl="${esc(o.key)}">下载</button><button class="btn danger sm" data-r2-odel="${esc(o.key)}">删除</button></div>`).join('')
+      + ((r.folders || []).length + (r.objects || []).length === 0 ? '<p class="hint">这个位置是空的</p>' : '')
+      + `<div style="margin-top:10px"><label class="mlab">上传文件到当前位置（≤4MB）</label><input type="file" id="r2UpFile" class="minput"><div class="btns" style="justify-content:flex-start"><button class="btn sm" id="r2UpBtn">上传</button></div></div>`;
+    const root = $('#r2Root'); if (root) root.addEventListener('click', () => { M.r2prefix = ''; loadR2Objects(); });
+    const up = $('#r2Up'); if (up) up.addEventListener('click', () => { const parts = (M.r2prefix || '').replace(/\/$/, '').split('/'); parts.pop(); M.r2prefix = parts.length ? parts.join('/') + '/' : ''; loadR2Objects(); });
+    $$('#r2Files [data-r2-folder]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); M.r2prefix = el.dataset.r2Folder; loadR2Objects(); }));
+    $$('#r2Files [data-r2-dl]').forEach((b) => b.addEventListener('click', async () => {
+      try { const r2 = await api(`/api/r2objects?account=${M.acct.id}&what=download&bucket=${encodeURIComponent(M.r2bucket)}&key=${encodeURIComponent(b.dataset.r2Dl)}`); window.open(r2.url, '_blank'); }
+      catch (e) { toast(e.message); }
+    }));
+    $$('#r2Files [data-r2-odel]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
+      try { await api(`/api/r2objects?account=${M.acct.id}&bucket=${encodeURIComponent(M.r2bucket)}&key=${encodeURIComponent(b.dataset.r2Odel)}`, { method: 'DELETE' }); toast('已删除'); loadR2Objects(); }
+      catch (e) { toast(e.message); }
+    })));
+    $('#r2UpBtn').addEventListener('click', async () => {
+      const f = $('#r2UpFile').files[0];
+      if (!f) { toast('先选个文件'); return; }
+      if (f.size > 4 * 1024 * 1024) { toast('超过 4MB 上限'); return; }
+      const data = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(String(rd.result).split(',')[1]); rd.onerror = rej; rd.readAsDataURL(f); });
+      try { await api('/api/r2objects', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'upload', bucket: M.r2bucket, key: (M.r2prefix || '') + f.name, data }) }); toast('上传完成'); loadR2Objects(); }
+      catch (e) { toast(e.message); }
     });
   } catch (e) { box.innerHTML = mErr(e); }
 }

@@ -44,11 +44,11 @@
 
 | 桌面端 · 总览 | 账号详情 |
 | --- | --- |
-| ![桌面端总览](docs/preview-desktop.png) | ![账号详情](docs/preview-detail.png) |
+| ![桌面端总览](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/preview-desktop.png) | ![账号详情](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/preview-detail.png) |
 
 | 深色模式 | 移动端 |
 | --- | --- |
-| ![深色模式](docs/preview-dark.png) | ![移动端](docs/preview-mobile.png) |
+| ![深色模式](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/preview-dark.png) | ![移动端](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/preview-mobile.png) |
 
 ## 🚀 快速部署
 
@@ -65,12 +65,12 @@
 <details>
 <summary>📸 部署图片教程（点开看图，6 步）</summary>
 
-![第1步](docs/tut-deploy-1.png)
-![第2步](docs/tut-deploy-2.png)
-![第3步](docs/tut-deploy-3.png)
-![第4步](docs/tut-deploy-4.png)
-![第5步](docs/tut-deploy-5.png)
-![第6步](docs/tut-deploy-6.png)
+![第1步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-1.png)
+![第2步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-2.png)
+![第3步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-3.png)
+![第4步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-4.png)
+![第5步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-5.png)
+![第6步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-deploy-6.png)
 
 </details>
 
@@ -144,13 +144,13 @@ npx wrangler pages deploy . --project-name ym-cf-panel
 <details>
 <summary>📸 令牌与使用图片教程（点开看图，7 步）</summary>
 
-![第1步](docs/tut-use-1.png)
-![第2步](docs/tut-use-2.png)
-![第3步](docs/tut-use-3.png)
-![第4步](docs/tut-use-4.png)
-![第5步](docs/tut-use-5.png)
-![第6步](docs/tut-use-6.png)
-![第7步](docs/tut-use-7.png)
+![第1步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-1.png)
+![第2步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-2.png)
+![第3步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-3.png)
+![第4步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-4.png)
+![第5步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-5.png)
+![第6步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-6.png)
+![第7步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-use-7.png)
 
 </details>
 
@@ -201,10 +201,10 @@ npx wrangler pages deploy . --project-name ym-cf-panel
 <details>
 <summary>📸 升级图片教程（点开看图，4 步）</summary>
 
-![第1步](docs/tut-upgrade-1.png)
-![第2步](docs/tut-upgrade-2.png)
-![第3步](docs/tut-upgrade-3.png)
-![第4步](docs/tut-upgrade-4.png)
+![第1步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-upgrade-1.png)
+![第2步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-upgrade-2.png)
+![第3步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-upgrade-3.png)
+![第4步](https://gcore.jsdelivr.net/gh/YiMing918/ym-cf-panel@main/docs/tut-upgrade-4.png)
 
 </details>
 

@@ -119,7 +119,14 @@ npx wrangler kv namespace create cf-panel-data
 npx wrangler pages deploy . --project-name ym-cf-panel
 ```
 
-部署后到控制台给项目绑定 KV（变量名 `PANEL_KV`）并重新部署一次，效果同上。
+注意：上面第 3 条命令只是**建好了 KV 命名空间**，它和项目还没有任何关系——**还要手动把 KV 绑定到项目上**（wrangler 部署不会自动绑），不绑打开面板会提示初始化失败。部署完接着做：
+
+1. Cloudflare 控制台 → Workers 和 Pages → 打开刚部署的 `ym-cf-panel` 项目 → 设置 → 绑定 → 添加 → **KV 命名空间**。
+2. 变量名称填 **`PANEL_KV`**，命名空间选第 3 条命令建的那个（`cf-panel-data`），保存。
+3. 回到项目的部署页 **重新部署一次**（或重跑一遍 `npx wrangler pages deploy . --project-name ym-cf-panel`），绑定才生效。
+4. 打开 `*.pages.dev` 域名，点右上角「设置管理员」设好后台账号密码——能进到这一步就说明绑定对了。
+
+> 两个名字别搞混：**`cf-panel-data` 是 KV 命名空间的名字**（建 KV 时取的，叫什么都行、可以改）；**`PANEL_KV` 是 Pages 项目里引用它的绑定变量名**（代码只按这个名字找 KV，必须一字不差）。一个是「库的名字」，一个是「代码里叫这个库的名字」。
 
 ## 🔑 API 令牌权限说明（重要）
 

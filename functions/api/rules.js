@@ -33,7 +33,8 @@ export async function onRequestGet({ request, env }) {
       });
     }
     // rulesets: list zone rulesets, keep the interesting phases with their rules
-    const d = await cfApiAll(acct, `/zones/${zone}/rulesets`);
+    // (the rulesets list endpoint rejects per_page > 50 — cap it)
+    const d = await cfApiAll(acct, `/zones/${zone}/rulesets`, { perPage: 50 });
     const sets = [];
     for (const rs of d.result || []) {
       if (!PHASE_LABEL[rs.phase]) continue;

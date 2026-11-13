@@ -14,7 +14,8 @@ export async function onRequestGet({ request, env }) {
       return json({ ssl: data.result && data.result.value });
     }
     if (what === 'pagesdomains') {
-      const data = await cfApiAll(acct, `/accounts/${acct.accountId}/pages/projects/${encodeURIComponent(url.searchParams.get('project'))}/domains`);
+      // Pages domains list rejects per_page > 25 ("Invalid list options") — cap it.
+      const data = await cfApiAll(acct, `/accounts/${acct.accountId}/pages/projects/${encodeURIComponent(url.searchParams.get('project'))}/domains`, { perPage: 25 });
       return json({ domains: (data.result || []).map((d) => ({ name: d.name, status: d.status })), total: data.result_info ? data.result_info.total_count : (data.result || []).length, truncated: !!(data.result_info && data.result_info.truncated) });
     }
     return json({ error: '未知查询' }, 400);

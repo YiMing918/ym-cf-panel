@@ -37,7 +37,10 @@ async function cfFetch(account, path, opts = {}) {
 // per_page=100, max 50 pages / 5000 items; truncated + real total surfaced
 // in result_info instead of silently dropping everything past page 1).
 async function cfFetchAll(account, path, opts = {}) {
-  const perPage = 100, maxPages = 50, maxItems = 5000;
+  // Most CF list endpoints accept per_page=100, but a few cap it lower
+  // (Pages lists cap at 25) — those callers pass opts.perPage to override.
+  const { perPage = 100, ...fetchOpts } = opts;
+  const maxPages = 50, maxItems = 5000;
   const q = path.indexOf('?');
   const kept = q < 0 ? [] : path.slice(q + 1).split('&').filter((kv) => kv && !kv.startsWith('per_page=') && !kv.startsWith('page='));
   const base = q < 0 ? path : path.slice(0, q) + (kept.length ? '?' + kept.join('&') : '');
@@ -45,7 +48,7 @@ async function cfFetchAll(account, path, opts = {}) {
   const all = [];
   let total = null, prevFirst = null;
   for (let page = 1; page <= maxPages; page++) {
-    const data = await cfFetch(account, `${base}${sep}per_page=${perPage}&page=${page}`, opts);
+    const data = await cfFetch(account, `${base}${sep}per_page=${perPage}&page=${page}`, fetchOpts);
     const rows = Array.isArray(data.result) ? data.result : [];
     const info = data.result_info || {};
     if (typeof info.total_count === 'number') total = info.total_count;
@@ -265,7 +268,7 @@ export async function getUsage(account, range) {
       const wrap = (pr) => pr.then((r) => ({ rows: r.result, info: r.result_info || null })).catch(() => null);
       const [scriptsW, projectsW, dbsW, kvsW, bucketsW, zonesW] = await Promise.all([
         wrap(cfFetchAll(account, `/accounts/${id}/workers/scripts`)),
-        wrap(cfFetchAll(account, `/accounts/${id}/pages/projects`)),
+        wrap(cfFetchAll(account, `/accounts/${id}/pages/projects`, { perPage: 25 })), // Pages lists reject per_page > 25
         wrap(cfFetchAll(account, `/accounts/${id}/d1/database`)),
         wrap(cfFetchAll(account, `/accounts/${id}/storage/kv/namespaces`)),
         wrap(cfFetchAllNested(account, `/accounts/${id}/r2/buckets`, 'buckets')),

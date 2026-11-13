@@ -7,7 +7,8 @@ export async function onRequestGet({ request, env }) { // deployments of one pro
   try {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
-    const data = await cfApiAll(acct, `/accounts/${acct.accountId}/pages/projects/${encodeURIComponent(url.searchParams.get('project'))}/deployments`);
+    // Pages deployments list rejects per_page > 25 ("Invalid list options") — cap it.
+    const data = await cfApiAll(acct, `/accounts/${acct.accountId}/pages/projects/${encodeURIComponent(url.searchParams.get('project'))}/deployments`, { perPage: 25 });
     return json({
       total: data.result_info ? data.result_info.total_count : (data.result || []).length, truncated: !!(data.result_info && data.result_info.truncated),
       deployments: (data.result || []).map((d) => ({

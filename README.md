@@ -1,6 +1,6 @@
 # YM CF 面板 · 多账号 Cloudflare 管理面板
 
-![版本](https://img.shields.io/badge/版本-v4.0.2-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
+![版本](https://img.shields.io/badge/版本-v4.0.3-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
 
 把你名下**多个 Cloudflare 账号**装进一个面板：用量监控（Workers / Pages 函数、KV、D1、R2 用量与免费额度、域名流量与来源国家、状态码、热门路径、缓存命中率）+ 在线管理（DNS、域名设置、规则、邮件转发、KV/D1 数据、Pages/Workers 部署、隧道、清缓存）。部署在 Cloudflare Pages 上，**全程免费**，数据只经过你自己的账号。
 
@@ -269,6 +269,7 @@ npx wrangler pages deploy . --project-name ym-cf-panel
 
 ## 📝 版本
 
+- **v4.0.3（2026-11-13）**：修复分页参数超限导致的三处读取失败——面板的分页助手默认 per_page=100，超过部分接口上限会被 Cloudflare 直接拒绝：Pages 部署历史与项目域名列表改按其上限 25 传参（此前报「Invalid list options」）、总览项目列表改按其未公开上限 10 传参（此前返回空）、WAF 规则集列表改按其上限 50 传参（此前报「per_page cannot be greater than 50」）。已在三个账号上实测恢复。
 - **v4.0.2（2026-11-09）**：全量审计修复——列表拉全：域名、Workers 版本、Pages 部署记录、R2 对象、KV 导出等 20 处改为翻页/续页拉全（KV 导出上限由 1000 提升至 10000 并带护栏）；D1 查询等 4 处受平台上限的列表改明示真实总数与截断标记，不再静默少显示。
 - **v4.0.1（2026-11-08）**：审计定版——后台登录加失败锁定（同一来源 15 分钟内失败 5 次锁定 15 分钟，计数存 KV）；DNS 记录列表改为翻页拉全（每页 100 条、按接口返回的总页数拉完，不再只取第一页）；新装管理员密码下限提到 6 位（首次设置与改密同口径）。
 - **v4.0（2026-11-06）**：全功能版——新增「账号」页签（成员管理、账号改名、账单资料、官方审计日志、Web Analytics、账号级 API 令牌）与「产品」页签（Access、Queues、负载均衡、注册商、Stream、Images）；WAF 自定义规则可新建/编辑/删除；域名设置扩到 23 项并支持自定义证书与通用 SSL 开关；Workers 可查看/上传代码、管理路由、看日志快照；R2 桶内文件管理（S3 密钥）；KV 整体导入/导出；D1 时间旅行恢复；DNS 批量删除；面板操作日志。需给令牌补对应权限（见权限说明的全功能表）。

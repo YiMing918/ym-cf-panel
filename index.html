@@ -775,7 +775,7 @@ async function loadKv() {
       const blob = new Blob([JSON.stringify(r.entries, null, 2)], { type: 'application/json' });
       const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
       link.download = 'kv-export.json'; link.click(); URL.revokeObjectURL(link.href);
-      toast(`已导出 ${r.total} 条`);
+      toast(r.truncated ? `⚠️ 键太多，导出已被截断（${r.total} 条），这份备份不完整` : `已导出 ${r.total} 条`);
     } catch (e) { toast(e.message); }
   });
   $('#kvImportBtn').addEventListener('click', (e) => arm(e.target, async () => {
@@ -1230,7 +1230,11 @@ async function loadTnDetail(id) {
   try {
     const r = await api(`/api/tunnels?account=${M.acct.id}&tunnel=${id}`);
     const rows = r.ingress.filter((x) => x.hostname);
-    box.innerHTML = `${rows.map((x, i) => `<div class="mrow" data-ing-row><div><label class="mlab">主机名</label><input class="minput" data-ing-host value="${esc(x.hostname)}"></div><div><label class="mlab">服务（如 http://localhost:8080）</label><input class="minput" data-ing-svc value="${esc(x.service)}"></div></div>`).join('') || '<p class="hint">还没有主机名规则</p>'}
+    // Keep the full original rule objects: fields the form doesn't show
+    // (path, originRequest, …) are sent back untouched on save.
+    const origRules = rows.map((x) => ({ ...x }));
+    const tail = r.ingress.find((x) => !x.hostname);
+    box.innerHTML = `${rows.map((x, i) => `<div class="mrow" data-ing-row><div><label class="mlab">主机名</label><input class="minput" data-ing-host value="${esc(x.hostname)}"></div><div><label class="mlab">服务（如 http://localhost:8080）</label><input class="minput" data-ing-svc value="${esc(x.service)}"></div></div>`).join('') || '<p class="hint">还没有主机名规则</p>'}${tail ? `<p class="hint">兜底规则：${esc(tail.service || '')}（没有主机名匹配时走这条；保存时自动保留，不用管）</p>` : ''}
     <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="ingAdd-${id}">＋ 加一行</button><button class="btn sm" id="ingSave-${id}">保存规则</button></div>
     <div class="mrow"><div><label class="mlab">给某个主机名一键生成 DNS（选域名）</label>${zoneSel('routeZone-' + id)}</div>
     <div><label class="mlab">主机名（完整，如 nas.example.com）</label><input class="minput" id="routeHost-${id}" placeholder="nas.example.com"></div>
@@ -1242,7 +1246,7 @@ async function loadTnDetail(id) {
       box.insertBefore(div, box.querySelector('.btns'));
     });
     document.getElementById('ingSave-' + id).addEventListener('click', async () => {
-      const rules = [...box.querySelectorAll('[data-ing-row]')].map((row) => ({ hostname: row.querySelector('[data-ing-host]').value, service: row.querySelector('[data-ing-svc]').value }));
+      const rules = [...box.querySelectorAll('[data-ing-row]')].map((row, i) => ({ ...(origRules[i] || {}), hostname: row.querySelector('[data-ing-host]').value, service: row.querySelector('[data-ing-svc]').value }));
       try { await api('/api/tunnels', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'ingress', tunnel: id, rules }) }); toast('规则已保存'); }
       catch (e) { toast(e.message); }
     });

@@ -111,7 +111,12 @@ export function rangeWindow(range) {
     return { startISO: start.toISOString(), endISO, startDate: isoDay(start), endDate: isoDay(now) };
   }
   const days = range === '30d' ? 30 : 7;
-  const start = new Date(now.getTime() - days * 86400000);
+  // Align the datetime window (Workers) and the date window (KV/D1/R2)
+  // to the SAME span: `days` whole UTC calendar days including today.
+  // The old code started the datetime window exactly days*24h back but
+  // the inclusive date window then covered days+1 calendar days, so one
+  // "近 7 天" page silently mixed a 7-day and an 8-day statistic.
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - (days - 1) * 86400000);
   return { startISO: start.toISOString(), endISO, startDate: isoDay(start), endDate: isoDay(now) };
 }
 

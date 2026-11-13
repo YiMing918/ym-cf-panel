@@ -17,6 +17,16 @@ async function signingKey(secret, date) {
   k = await hmac(k, 'auto'); k = await hmac(k, 's3'); k = await hmac(k, 'aws4_request');
   return k;
 }
+// SigV4 encoding is RFC 3986: encodeURIComponent leaves !'()* unescaped,
+// which SigV4 does not allow. Canonical query strings must use encoded
+// pairs sorted by name, then value — the plain signed request used to
+// skip the sort entirely (the presign path had it), which could produce
+// SignatureDoesNotMatch on multi-parameter calls like ListObjectsV2.
+const s3enc = (s) => encodeURIComponent(String(s)).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+const canonQs = (query) => Object.entries(query)
+  .map(([k, v]) => [s3enc(k), s3enc(v)])
+  .sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0))
+  .map(([k, v]) => `${k}=${v}`).join('&');
 const credKey = (id) => 'r2s3:' + id;
 
 async function getCred(env, panelId) {
@@ -28,7 +38,7 @@ async function s3(acct, cred, method, path, { query = {}, body = null, payloadHa
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const date = stamp.slice(0, 8);
   const hash = payloadHash || hex(await sha256(body || ''));
-  const qs = Object.entries(query).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const qs = canonQs(query);
   const headers = { host, 'x-amz-content-sha256': hash, 'x-amz-date': stamp };
   const signedHeaders = Object.keys(headers).sort().join(';');
   const canonHeaders = Object.keys(headers).sort().map((k) => `${k}:${headers[k]}\n`).join('');
@@ -45,7 +55,7 @@ async function presign(acct, cred, bucket, key, expiresSec) {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
   const date = stamp.slice(0, 8);
   const scope = `${date}/auto/s3/aws4_request`;
-  const path = `/${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
+  const path = `/${bucket}/${key.split('/').map(s3enc).join('/')}`;
   const query = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': `${cred.ak}/${scope}`,
@@ -53,13 +63,13 @@ async function presign(acct, cred, bucket, key, expiresSec) {
     'X-Amz-Expires': String(expiresSec),
     'X-Amz-SignedHeaders': 'host',
   };
-  const qs = Object.entries(query).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const qs = canonQs(query);
   const canon = ['GET', path, qs, `host:${host}\n`, 'host', 'UNSIGNED-PAYLOAD'].join('\n');
   const toSign = ['AWS4-HMAC-SHA256', stamp, scope, hex(await sha256(canon))].join('\n');
   const sig = hex(await hmac(await signingKey(cred.sk, date), toSign));
   return `https://${host}${path}?${qs}&X-Amz-Signature=${sig}`;
 }
-const objPath = (bucket, key) => `/${bucket}/${(key || '').split('/').map(encodeURIComponent).join('/')}`;
+const objPath = (bucket, key) => `/${bucket}/${(key || '').split('/').map(s3enc).join('/')}`;
 
 export async function onRequestGet({ request, env }) {
   const a = await requireAuth(env, request); if (a.error) return a.error;

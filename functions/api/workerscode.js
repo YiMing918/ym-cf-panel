@@ -48,10 +48,35 @@ export async function onRequestPost({ request, env }) {
       const script = String(b.script || '');
       const code = String(b.code || '');
       if (!code.trim()) return json({ error: '代码不能为空' }, 400);
+      // Preserve the existing script's bindings AND compatibility settings.
+      // A failed settings read must abort the upload unless it is a 404
+      // (script genuinely does not exist yet): treating a permission or
+      // network failure as "new script" would silently wipe the worker's
+      // KV/D1/R2 bindings on deploy.
       let bindings = [];
-      try { const s = await cfApi(acct, `${A(acct)}/${script}/settings`); bindings = (s.result && s.result.bindings) || []; } catch { /* new script */ }
+      const compat = {};
+      try {
+        const s = await cfApi(acct, `${A(acct)}/${script}/settings`);
+        const res = (s && s.result) || {};
+        bindings = res.bindings || [];
+        for (const k of ['compatibility_date', 'compatibility_flags', 'usage_model', 'logpush']) {
+          if (res[k] !== undefined) compat[k] = res[k];
+        }
+      } catch (e) {
+        if (!e || e.status !== 404) {
+          return json({ error: `读取现有脚本配置失败，已取消上传（避免覆盖原有绑定）：${(e && e.message) || e}` }, 502);
+        }
+        /* 404: genuinely new script, nothing to preserve */
+      }
       const module = !!b.module;
-      const metadata = module ? { main_module: 'index.js', bindings, compatibility_date: '2024-11-01' } : { body_part: 'script', bindings };
+      // Module uploads need a compatibility_date: keep the script's own
+      // when it has one, fall back to the previous default only for
+      // genuinely new scripts (or settings that carried none).
+      const compatMd = { ...compat };
+      if (module && !compatMd.compatibility_date) compatMd.compatibility_date = '2024-11-01';
+      const metadata = module
+        ? { main_module: 'index.js', bindings, ...compatMd }
+        : { body_part: 'script', bindings, ...compat };
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       form.append(module ? 'index.js' : 'script', new Blob([code], { type: 'application/javascript' }), module ? 'index.js' : 'script.js');

@@ -28,8 +28,19 @@ export async function onRequestGet({ request, env }) {
     const entries = [];
     let bytes = 0;
     for (const name of names) {
-      const r = await fetch(`https://api.cloudflare.com/client/v4${base}/values/${encodeURIComponent(name)}`, { headers: { 'Authorization': 'Bearer ' + acct.token } });
-      const value = r.ok ? await r.text() : '';
+      let r;
+      try {
+        r = await fetch(`https://api.cloudflare.com/client/v4${base}/values/${encodeURIComponent(name)}`, { headers: { 'Authorization': 'Bearer ' + acct.token } });
+      } catch {
+        return json({ error: `读取键「${name}」时网络失败，导出已终止：这份备份不完整，请勿使用` }, 502);
+      }
+      // A failed read must NEVER be exported as an empty value: restoring
+      // such a backup would silently overwrite the real value with ''.
+      // Fail the whole export loudly instead of producing a broken backup.
+      if (!r.ok) {
+        return json({ error: `读取键「${name}」失败（HTTP ${r.status}），导出已终止：这份备份不完整，请勿使用` }, 502);
+      }
+      const value = await r.text();
       bytes += value.length;
       if (bytes > 4 * 1024 * 1024) return json({ error: '数据总量超过 4MB，请分批处理' }, 413);
       entries.push({ name, value });

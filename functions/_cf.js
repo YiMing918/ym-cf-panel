@@ -38,7 +38,8 @@ async function cfFetch(account, path, opts = {}) {
 // in result_info instead of silently dropping everything past page 1).
 async function cfFetchAll(account, path, opts = {}) {
   // Most CF list endpoints accept per_page=100, but a few cap it lower
-  // (Pages lists cap at 25) — those callers pass opts.perPage to override.
+  // (Pages lists: projects 10, deployments/domains 25) — those callers
+  // pass opts.perPage to override.
   const { perPage = 100, ...fetchOpts } = opts;
   const maxPages = 50, maxItems = 5000;
   const q = path.indexOf('?');
@@ -268,7 +269,7 @@ export async function getUsage(account, range) {
       const wrap = (pr) => pr.then((r) => ({ rows: r.result, info: r.result_info || null })).catch(() => null);
       const [scriptsW, projectsW, dbsW, kvsW, bucketsW, zonesW] = await Promise.all([
         wrap(cfFetchAll(account, `/accounts/${id}/workers/scripts`)),
-        wrap(cfFetchAll(account, `/accounts/${id}/pages/projects`, { perPage: 25 })), // Pages lists reject per_page > 25
+        wrap(cfFetchAll(account, `/accounts/${id}/pages/projects`, { perPage: 10 })), // Pages projects list rejects per_page > 10 (undocumented cap, error 8000024)
         wrap(cfFetchAll(account, `/accounts/${id}/d1/database`)),
         wrap(cfFetchAll(account, `/accounts/${id}/storage/kv/namespaces`)),
         wrap(cfFetchAllNested(account, `/accounts/${id}/r2/buckets`, 'buckets')),

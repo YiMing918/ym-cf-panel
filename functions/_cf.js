@@ -47,23 +47,30 @@ async function cfFetchAll(account, path, opts = {}) {
   const base = q < 0 ? path : path.slice(0, q) + (kept.length ? '?' + kept.join('&') : '');
   const sep = base.includes('?') ? '&' : '?';
   const all = [];
-  let total = null, prevFirst = null;
+  let total = null, prevFirst = null, cursor = null, dupBreak = false;
   for (let page = 1; page <= maxPages; page++) {
-    const data = await cfFetch(account, `${base}${sep}per_page=${perPage}&page=${page}`, fetchOpts);
+    // 游标分页端点（如 R2 桶列表）：result_info 带 cursor 时改传 cursor，
+    // page 参数对这类端点不起作用（传了只会把第一页再返回一遍）
+    const qs = cursor ? `per_page=${perPage}&cursor=${encodeURIComponent(cursor)}` : `per_page=${perPage}&page=${page}`;
+    const data = await cfFetch(account, `${base}${sep}${qs}`, fetchOpts);
     const rows = Array.isArray(data.result) ? data.result : [];
     const info = data.result_info || {};
     if (typeof info.total_count === 'number') total = info.total_count;
     if (!rows.length) break;
     const firstSig = JSON.stringify(rows[0]);
-    if (page > 1 && prevFirst !== null && firstSig === prevFirst && total === null) break;
+    // 首行与上页完全相同 = 端点没理会分页参数：立即停并标记截断，
+    // 绝不把第一页重复计入凑满 total（旧逻辑在有 total_count 时会这么干）
+    if (page > 1 && prevFirst !== null && firstSig === prevFirst) { dupBreak = true; break; }
     prevFirst = firstSig;
     all.push(...rows);
+    if (all.length >= maxItems) break;
     if (total !== null && all.length >= total) break;
+    if (typeof info.cursor === 'string' && info.cursor) { cursor = info.cursor; continue; }
+    if (cursor) break; // 游标模式下 cursor 消失 = 已到最后一页
     if (info.total_pages && page >= info.total_pages) break;
     if (!info.total_pages && total === null && rows.length < perPage) break;
-    if (all.length >= maxItems) break;
   }
-  const truncated = (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
+  const truncated = dupBreak || (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
   return { result: all.slice(0, maxItems), result_info: { count: Math.min(all.length, maxItems), total_count: total !== null ? total : all.length, truncated: !!truncated } };
 }
 
@@ -74,24 +81,27 @@ async function cfFetchAllNested(account, path, key, opts = {}) {
   const base = q < 0 ? path : path.slice(0, q) + (kept.length ? '?' + kept.join('&') : '');
   const sep = base.includes('?') ? '&' : '?';
   const all = [];
-  let total = null, prevFirst = null, firstResult = {};
+  let total = null, prevFirst = null, firstResult = {}, cursor = null, dupBreak = false;
   for (let page = 1; page <= maxPages; page++) {
-    const data = await cfFetch(account, `${base}${sep}per_page=${perPage}&page=${page}`, opts);
+    const qs = cursor ? `per_page=${perPage}&cursor=${encodeURIComponent(cursor)}` : `per_page=${perPage}&page=${page}`;
+    const data = await cfFetch(account, `${base}${sep}${qs}`, opts);
     if (page === 1 && data.result && typeof data.result === 'object') firstResult = data.result;
     const rows = (data.result && Array.isArray(data.result[key])) ? data.result[key] : [];
     const info = data.result_info || {};
     if (typeof info.total_count === 'number') total = info.total_count;
     if (!rows.length) break;
     const firstSig = JSON.stringify(rows[0]);
-    if (page > 1 && prevFirst !== null && firstSig === prevFirst && total === null) break;
+    if (page > 1 && prevFirst !== null && firstSig === prevFirst) { dupBreak = true; break; }
     prevFirst = firstSig;
     all.push(...rows);
+    if (all.length >= maxItems) break;
     if (total !== null && all.length >= total) break;
+    if (typeof info.cursor === 'string' && info.cursor) { cursor = info.cursor; continue; }
+    if (cursor) break;
     if (info.total_pages && page >= info.total_pages) break;
     if (!info.total_pages && total === null && rows.length < perPage) break;
-    if (all.length >= maxItems) break;
   }
-  const truncated = (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
+  const truncated = dupBreak || (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
   return { result: { ...firstResult, [key]: all.slice(0, maxItems) }, result_info: { count: Math.min(all.length, maxItems), total_count: total !== null ? total : all.length, truncated: !!truncated } };
 }
 
@@ -177,8 +187,23 @@ const Q_ZONE_CACHE = `query($z: String!, $s: Time!, $e: Time!) { viewer { zones(
 } } }`;
 
 export async function verifyToken(account) {
-  const data = await cfFetch(account, '/user/tokens/verify');
-  return data.result; // { id, status }
+  // 用户令牌走 /user/tokens/verify；账号自有令牌（面板自己就能新建这种）
+  // 那个端点验不了，要走 /accounts/{id}/tokens/verify——两边都试。
+  try {
+    const data = await cfFetch(account, '/user/tokens/verify');
+    return data.result; // { id, status }
+  } catch (e) {
+    if (!account.accountId) throw e;
+    const data = await cfFetch(account, `/accounts/${account.accountId}/tokens/verify`);
+    return data.result;
+  }
+}
+
+// 校验令牌确实能访问所填的 Account ID（验令牌本身通过 ≠ 对该账号有权限，
+// 以前填错账号 ID 也能存进去，到用时才处处报错）
+export async function verifyAccountAccess(account) {
+  await cfFetch(account, `/accounts/${account.accountId}`);
+  return true;
 }
 
 export async function getUsage(account, range) {
@@ -305,7 +330,10 @@ export async function getUsage(account, range) {
       let requests = 0, bytes = 0, firstError = null, okZones = 0;
       const countries = {};
       const byZone = [];
-      for (const z of inv.data.zones.slice(0, 100)) { // guard: at most 100 zones analysed; zonesTotal/zonesTruncated below surface any excess
+      // 每 zone 一次 GraphQL = 一次子请求；免费版单请求上限 50，而本接口
+      // 前面已花了约 11 次（5 个 section + 6 个清单），故 zone 分析上限
+      // 收到 20，超出的以 zonesTruncated 如实标注，不再静默贴着上限跑
+      for (const z of inv.data.zones.slice(0, 20)) { // guard: at most 20 zones analysed; zonesTotal/zonesTruncated below surface any excess
         try {
           const d = await gql(account, Q_ZONE_HTTP, { z: z.id, s: w.startISO, e: w.endISO });
           const rows = ((d.viewer.zones || [])[0] || {}).httpRequestsAdaptiveGroups || [];
@@ -323,7 +351,10 @@ export async function getUsage(account, range) {
       if (!okZones && firstError) throw firstError;
       const out = {
         requests, bytes,
-        zonesAnalyzed: Math.min(inv.data.zones.length, 100), zonesTotal: inv.data.zones.length, zonesTruncated: inv.data.zones.length > 100,
+        zonesAnalyzed: Math.min(inv.data.zones.length, 20), zonesTotal: inv.data.zones.length, zonesTruncated: inv.data.zones.length > 20,
+        // 以前个别 zone 查询失败会被静默吞掉（只有全失败才抛错），总数
+        // 少计而页面无任何标记；现在把失败数与 partial 如实带出去
+        zonesFailed: Math.min(inv.data.zones.length, 20) - okZones, partial: okZones < Math.min(inv.data.zones.length, 20),
         topCountries: Object.entries(countries).map(([name, requests]) => ({ name, requests }))
           .sort((x, y) => y.requests - x.requests).slice(0, 8),
         byZone: byZone.sort((x, y) => y.requests - x.requests),

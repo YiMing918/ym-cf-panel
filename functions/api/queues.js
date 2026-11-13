@@ -1,5 +1,5 @@
 import { requireAuth, json, readBody } from '../_auth.js';
-import { resolveAccount, cfApi, cfApiAll, cfApiAllNested, fail } from '../_manage.js';
+import { resolveAccount, cfApi, cfApiAll, fail } from '../_manage.js';
 import { addAudit } from '../_store.js';
 
 // Queues: list / create / delete. Needs Workers Queues (Edit) permission.
@@ -12,17 +12,24 @@ export async function onRequestGet({ request, env }) {
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     const d = await cfApiAll(acct, A(acct));
     const queues = [];
+    // 每队列再查一次详情是 N+1 子请求：免费版上限 50，队列一多必爆。
+    // 只给前 20 个查详情，其余计数留空并以 countsTruncated 如实标注。
+    const DETAIL_CAP = 20;
+    let qi = 0;
     for (const q of d.result || []) {
       let detail = null;
-      try { detail = (await cfApi(acct, `${A(acct)}/${q.queue_id}`)).result; } catch { /* counts optional */ }
+      if (qi < DETAIL_CAP) {
+        try { detail = (await cfApi(acct, `${A(acct)}/${q.queue_id}`)).result; } catch { /* counts optional */ }
+      }
+      qi++;
       queues.push({
         id: q.queue_id, name: q.queue_name,
         producers: detail ? (detail.producers || []).length : null,
         consumers: detail ? (detail.consumers || []).length : null,
-        created: q.created_on, backlog: detail && detail.settings ? undefined : undefined,
+        created: q.created_on,
       });
     }
-    return json({ queues, total: d.result_info ? d.result_info.total_count : queues.length, truncated: !!(d.result_info && d.result_info.truncated) });
+    return json({ queues, total: d.result_info ? d.result_info.total_count : queues.length, truncated: !!(d.result_info && d.result_info.truncated), countsTruncated: queues.length > DETAIL_CAP });
   } catch (e) { return fail(e); }
 }
 

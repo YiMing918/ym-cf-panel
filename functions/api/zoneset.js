@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env }) {
     if (b.what === 'dnssec') {
       const status = b.enabled ? 'active' : 'disabled';
       await cfApi(acct, `/zones/${b.zone}/dnssec`, { method: 'PATCH', body: JSON.stringify({ status }) });
-    await addAudit(env, a.sess.user, 'zone.dnssec', `${acct.name} · DNSSEC ${status}`);
+      await addAudit(env, a.sess.user, 'zone.dnssec', `${acct.name} · DNSSEC ${status}`);
       return json({ ok: true });
     }
     if (b.id === 'bot_fight_mode') {

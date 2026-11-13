@@ -54,24 +54,32 @@ export async function cfApiAll(account, path, opts = {}) {
   const all = [];
   let total = null;
   let prevFirst = null;
+  let cursor = null, dupBreak = false;
   for (let page = 1; page <= maxPages; page++) {
-    const data = await cfApi(account, `${base}${sep}per_page=${perPage}&page=${page}`, fetchOpts);
+    // Cursor-paginated endpoints (e.g. R2 buckets) ignore `page`; follow
+    // result_info.cursor when the endpoint offers one.
+    const qs = cursor ? `per_page=${perPage}&cursor=${encodeURIComponent(cursor)}` : `per_page=${perPage}&page=${page}`;
+    const data = await cfApi(account, `${base}${sep}${qs}`, fetchOpts);
     const rows = Array.isArray(data.result) ? data.result : [];
     const info = data.result_info || {};
     if (typeof info.total_count === 'number') total = info.total_count;
     if (!rows.length) break;
     // If the endpoint ignored the paging params it returns page 1 again —
-    // detect the repeated first row and stop instead of duplicating forever.
+    // detect the repeated first row and stop instead of duplicating rows
+    // until total is "reached" (the old guard skipped this when the
+    // endpoint reported a total_count, which produced duplicated lists).
     const firstSig = JSON.stringify(rows[0]);
-    if (page > 1 && prevFirst !== null && firstSig === prevFirst && total === null) break;
+    if (page > 1 && prevFirst !== null && firstSig === prevFirst) { dupBreak = true; break; }
     prevFirst = firstSig;
     all.push(...rows);
+    if (all.length >= maxItems) break;
     if (total !== null && all.length >= total) break;
+    if (typeof info.cursor === 'string' && info.cursor) { cursor = info.cursor; continue; }
+    if (cursor) break;
     if (info.total_pages && page >= info.total_pages) break;
     if (!info.total_pages && total === null && rows.length < perPage) break;
-    if (all.length >= maxItems) break;
   }
-  const truncated = (total !== null && all.length < total) || all.length >= maxItems && (total === null || all.length < total);
+  const truncated = dupBreak || (total !== null && all.length < total) || all.length >= maxItems && (total === null || all.length < total);
   return {
     result: all.slice(0, maxItems),
     result_info: { count: Math.min(all.length, maxItems), total_count: total !== null ? total : all.length, truncated: !!truncated },
@@ -89,23 +97,27 @@ export async function cfApiAllNested(account, path, key, opts = {}) {
   let total = null;
   let firstResult = {};
   let prevFirst = null;
+  let cursor = null, dupBreak = false;
   for (let page = 1; page <= maxPages; page++) {
-    const data = await cfApi(account, `${base}${sep}per_page=${perPage}&page=${page}`, fetchOpts);
+    const qs = cursor ? `per_page=${perPage}&cursor=${encodeURIComponent(cursor)}` : `per_page=${perPage}&page=${page}`;
+    const data = await cfApi(account, `${base}${sep}${qs}`, fetchOpts);
     if (page === 1 && data.result && typeof data.result === 'object') firstResult = data.result;
     const rows = (data.result && Array.isArray(data.result[key])) ? data.result[key] : [];
     const info = data.result_info || {};
     if (typeof info.total_count === 'number') total = info.total_count;
     if (!rows.length) break;
     const firstSig = JSON.stringify(rows[0]);
-    if (page > 1 && prevFirst !== null && firstSig === prevFirst && total === null) break;
+    if (page > 1 && prevFirst !== null && firstSig === prevFirst) { dupBreak = true; break; }
     prevFirst = firstSig;
     all.push(...rows);
+    if (all.length >= maxItems) break;
     if (total !== null && all.length >= total) break;
+    if (typeof info.cursor === 'string' && info.cursor) { cursor = info.cursor; continue; }
+    if (cursor) break;
     if (info.total_pages && page >= info.total_pages) break;
     if (!info.total_pages && total === null && rows.length < perPage) break;
-    if (all.length >= maxItems) break;
   }
-  const truncated = (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
+  const truncated = dupBreak || (total !== null && all.length < total) || (all.length >= maxItems && (total === null || all.length < total));
   return {
     result: { ...firstResult, [key]: all.slice(0, maxItems) },
     result_info: { count: Math.min(all.length, maxItems), total_count: total !== null ? total : all.length, truncated: !!truncated },

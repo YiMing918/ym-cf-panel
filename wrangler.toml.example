@@ -1,0 +1,16 @@
+# YM CF Panel — wrangler 配置示例（可选）
+#
+# 本项目通常直接在 Cloudflare Pages 后台连接 Git 部署，KV 绑定在
+# 后台「设置 → 绑定」里配（绑定名必须为 PANEL_KV）。本文件只是给
+# 习惯 wrangler 部署的人一个照着填的模板：复制为 wrangler.toml，
+# 把 id 换成你自己的 KV 命名空间 ID 再用。
+name = "ym-cf-panel"
+pages_build_output_dir = "."
+compatibility_date = "2024-11-01"
+
+[[kv_namespaces]]
+binding = "PANEL_KV"
+id = "把这里换成你的 KV 命名空间 ID"
+
+# 可选变量（在 Pages 后台「设置 → 环境变量」里配，不要写进仓库）：
+# SETUP_TOKEN —— 首次设置管理员时需要的口令（防抢注），强烈建议配

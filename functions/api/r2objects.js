@@ -101,13 +101,18 @@ export async function onRequestGet({ request, env }) {
       const text = await resp.text();
       if (!resp.ok) return json({ error: `S3 接口 ${resp.status}：${text.slice(0, 160)}` }, 502);
       pages++;
+      // S3 返回的是 XML：键名里的 & < > 等字符会被转义成实体，
+      // 摘出来必须解码，否则含这类字符的键名显示成 a&amp;b.txt，
+      // 拿去下载/删除会打到不存在的对象上
+      const xmlDec = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
       for (const m of text.matchAll(/<CommonPrefixes><Prefix>([^<]*)<\/Prefix>/g)) {
-        if (!seenFolders.has(m[1])) { seenFolders.add(m[1]); folders.push(m[1]); }
+        const p = xmlDec(m[1]);
+        if (!seenFolders.has(p)) { seenFolders.add(p); folders.push(p); }
       }
       for (const m of text.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
         const block = m[1];
         const pick = (tag) => { const mm = block.match(new RegExp(`<${tag}>([^<]*)</${tag}>`)); return mm ? mm[1] : ''; };
-        const o = { key: pick('Key'), size: Number(pick('Size')), modified: pick('LastModified') };
+        const o = { key: xmlDec(pick('Key')), size: Number(pick('Size')), modified: pick('LastModified') };
         if (o.key && o.key !== prefix) objects.push(o);
       }
       const isTrunc = /<IsTruncated>true<\/IsTruncated>/.test(text);
@@ -127,7 +132,7 @@ export async function onRequestPost({ request, env }) {
     if (b.what === 'setcred') {
       const accounts = await getAccounts(env);
       if (!accounts.some((x) => x.id === b.account)) return json({ error: '账号不存在' }, 404);
-      if (b.clear) { await env.PANEL_KV.delete(credKey(b.account)); return json({ ok: true }); }
+      if (b.clear) { await env.PANEL_KV.delete(credKey(b.account)); await addAudit(env, a.sess.user, 'r2.s3cred', '已清除 R2 S3 密钥'); return json({ ok: true }); }
       const ak = String(b.ak || '').trim(); const sk = String(b.sk || '').trim();
       if (ak.length < 10 || sk.length < 10) return json({ error: 'Access Key ID / Secret 太短，不像有效密钥' }, 400);
       await env.PANEL_KV.put(credKey(b.account), JSON.stringify({ ak, sk }));

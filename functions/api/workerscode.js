@@ -1,5 +1,5 @@
 import { requireAuth, json, readBody } from '../_auth.js';
-import { resolveAccount, cfApi, cfApiAll, cfApiAllNested, fail } from '../_manage.js';
+import { resolveAccount, cfApi, cfApiAll, fail } from '../_manage.js';
 import { addAudit } from '../_store.js';
 
 // Workers script code: view (best-effort multipart extraction), upload new
@@ -18,7 +18,7 @@ export async function onRequestGet({ request, env }) {
       return json({ routes: (d.result || []).map((r) => ({ id: r.id, pattern: r.pattern, script: r.script || '' })), total: d.result_info ? d.result_info.total_count : (d.result || []).length, truncated: !!(d.result_info && d.result_info.truncated) });
     }
     const script = url.searchParams.get('script');
-    const resp = await fetch(`https://api.cloudflare.com/client/v4${A(acct)}/${script}`, {
+    const resp = await fetch(`https://api.cloudflare.com/client/v4${A(acct)}/${encodeURIComponent(script)}`, {
       headers: { Authorization: `Bearer ${acct.token}` },
     });
     const raw = await resp.text();
@@ -54,9 +54,10 @@ export async function onRequestPost({ request, env }) {
       // network failure as "new script" would silently wipe the worker's
       // KV/D1/R2 bindings on deploy.
       let bindings = [];
+      let isNew = false;
       const compat = {};
       try {
-        const s = await cfApi(acct, `${A(acct)}/${script}/settings`);
+        const s = await cfApi(acct, `${A(acct)}/${encodeURIComponent(script)}/settings`);
         const res = (s && s.result) || {};
         bindings = res.bindings || [];
         for (const k of ['compatibility_date', 'compatibility_flags', 'usage_model', 'logpush']) {
@@ -66,25 +67,41 @@ export async function onRequestPost({ request, env }) {
         if (!e || e.status !== 404) {
           return json({ error: `读取现有脚本配置失败，已取消上传（避免覆盖原有绑定）：${(e && e.message) || e}` }, 502);
         }
-        /* 404: genuinely new script, nothing to preserve */
+        isNew = true; /* 404: genuinely new script, nothing to preserve */
       }
+      // secret 类绑定的值读不回来（GET settings 不回明文）：原样回传
+      // 可能把 secret 清掉。把它们从 bindings 里摘掉、改用 keep_bindings
+      // 让 Cloudflare 在服务端原样保留。
+      const SECRET_BINDINGS = ['secret_text', 'secret_key'];
+      const keepBindings = [];
+      if (!isNew && bindings.some((x) => SECRET_BINDINGS.includes(x.type))) keepBindings.push(...SECRET_BINDINGS);
+      const safeBindings = bindings.filter((x) => !SECRET_BINDINGS.includes(x.type));
       const module = !!b.module;
       // Module uploads need a compatibility_date: keep the script's own
       // when it has one, fall back to the previous default only for
       // genuinely new scripts (or settings that carried none).
       const compatMd = { ...compat };
       if (module && !compatMd.compatibility_date) compatMd.compatibility_date = '2024-11-01';
+      const keepMd = keepBindings.length ? { keep_bindings: keepBindings } : {};
       const metadata = module
-        ? { main_module: 'index.js', bindings, ...compatMd }
-        : { body_part: 'script', bindings, ...compat };
+        ? { main_module: 'index.js', bindings: safeBindings, ...keepMd, ...compatMd }
+        : { body_part: 'script', bindings: safeBindings, ...keepMd, ...compat };
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
       form.append(module ? 'index.js' : 'script', new Blob([code], { type: 'application/javascript' }), module ? 'index.js' : 'script.js');
-      const resp = await fetch(`https://api.cloudflare.com/client/v4${A(acct)}/${script}`, {
+      const resp = await fetch(`https://api.cloudflare.com/client/v4${A(acct)}/${encodeURIComponent(script)}`, {
         method: 'PUT', headers: { Authorization: `Bearer ${acct.token}` }, body: form,
       });
       const d = await resp.json().catch(() => null);
-      if (!resp.ok || !d || !d.success) return json({ error: `部署失败：${(d && d.errors && d.errors[0] && d.errors[0].message) || ('HTTP ' + resp.status)}` }, 502);
+      if (!resp.ok || !d || !d.success) {
+        const emsg = (d && d.errors && d.errors[0] && d.errors[0].message) || ('HTTP ' + resp.status);
+        const ecode = d && d.errors && d.errors[0] && d.errors[0].code;
+        // 10013 是 Cloudflare 上传服务自 2026-10 下旬起的波次性故障
+        //（社区多例、官方无根治，重试即成），不是脚本或面板的问题——
+        // 把重试指引说清，免得用户对着报错以为把 Worker 传坏了
+        const hint = (ecode === 10013 || resp.status === 502) ? '（这是 Cloudflare 上传服务的临时故障，通常稍等片刻重试一次即可）' : '';
+        return json({ error: `部署失败：${emsg}${hint}` }, 502);
+      }
       await addAudit(env, a.sess.user, 'worker.upload', `${acct.name} · ${script} 代码已更新`);
       return json({ ok: true });
     }

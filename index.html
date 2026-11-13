@@ -117,6 +117,7 @@
   <p class="hint" id="authHint"></p>
   <div class="fld"><label>账号</label><input id="authUser" autocomplete="username"></div>
   <div class="fld"><label id="authPwdLabel">密码</label><input id="authPwd" type="password" autocomplete="current-password"></div>
+  <div class="fld" id="authTokenFld" style="display:none"><label>设置口令</label><input id="authToken" type="password" autocomplete="off" placeholder="部署时配了 SETUP_TOKEN 才需要填"></div>
   <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="authGo">登录</button></div>
 </div></div>
 
@@ -144,7 +145,7 @@
   <div class="fld"><label>面板名称</label><input id="setName"></div>
   <div class="fld"><label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="setPublic" style="width:auto"> 未登录时公开今日汇总（只有总数，不含账号明细）</label></div>
   <div class="fld"><label>修改管理员密码（留空不改；先填原密码）</label><input id="setOldPwd" type="password" placeholder="原密码"></div>
-  <div class="fld"><input id="setNewPwd" type="password" placeholder="新密码（至少 6 位）"></div>
+  <div class="fld"><input id="setNewPwd" type="password" placeholder="新密码（至少 10 位）"></div>
   <div class="fld"><label>界面主题（保存在这台设备上）</label><select id="setTheme"><option value="light">浅色</option><option value="dark">深色</option><option value="auto">跟随系统</option></select></div>
   <p class="hint">YM CF 面板 v4.0</p>
   <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="setSave">保存</button></div>
@@ -197,7 +198,8 @@ applyTheme();
 function openAuth() {
   $('#authTitle').textContent = S.needsSetup ? '首次设置管理员账号' : '管理员登录';
   $('#authHint').textContent = S.needsSetup ? '这是新面板第一次使用，先给后台设个账号和密码，设完自动登录。' : '';
-  $('#authPwdLabel').textContent = S.needsSetup ? '设置密码（至少 6 位，记牢）' : '密码';
+  $('#authPwdLabel').textContent = S.needsSetup ? '设置密码（至少 10 位，记牢）' : '密码';
+  $('#authTokenFld').style.display = S.needsSetup ? '' : 'none';
   $('#authGo').textContent = S.needsSetup ? '设置并登录' : '登录';
   open('#mAuth');
 }
@@ -205,7 +207,7 @@ $('#authGo').addEventListener('click', async () => {
   const user = $('#authUser').value.trim(), password = $('#authPwd').value;
   if (!user || !password) { toast('账号和密码都要填'); return; }
   try {
-    await api(S.needsSetup ? '/api/setup' : '/api/login', { method: 'POST', body: JSON.stringify({ user, password }) });
+    await api(S.needsSetup ? '/api/setup' : '/api/login', { method: 'POST', body: JSON.stringify(S.needsSetup ? { user, password, setupToken: $('#authToken').value } : { user, password }) });
     $('#mAuth').classList.remove('open');
     toast(S.needsSetup ? '设置完成，已登录' : '登录成功');
     await boot();
@@ -353,17 +355,17 @@ function quotaBars(u, detail) { // daily quotas — Workers section + home cards
   return out.join('');
 }
 
-function r2Bars(u) { // R2 monthly quotas — 30d view only
+function r2Bars(u) { // R2 quotas — 30d rolling window vs the monthly free quota (approximation, labelled as such)
   const q = u.quotas, d = u.usage;
   if (u.usage.range !== '30d' || !d.r2.ok) return '';
-  return barHtml('R2 A 类操作（近 30 天 / 每月免费额度）', d.r2.data.classA, q.r2ClassAMonthly)
-    + barHtml('R2 B 类操作（近 30 天 / 每月免费额度）', d.r2.data.classB, q.r2ClassBMonthly)
+  return barHtml('R2 A 类操作（近 30 天滚动窗口，对照每月免费额度，仅供参考）', d.r2.data.classA, q.r2ClassAMonthly)
+    + barHtml('R2 B 类操作（近 30 天滚动窗口，对照每月免费额度，仅供参考）', d.r2.data.classB, q.r2ClassBMonthly)
     + bytesBarHtml('R2 存储（免费额度）', d.r2.data.storageBytes, q.r2StorageBytes);
 }
 
 function renderHome() {
   const t = sumTotals();
-  const rangeName = { today: '今日', '7d': '近 7 天', '30d': '近 30 天' }[S.range];
+  const rangeName = { today: '今日（UTC 日，北京早 8 点起算）', '7d': '近 7 天（UTC 日）', '30d': '近 30 天（UTC 日）' }[S.range];
   let html = `<div class="totals">
     <div class="tcard"><div class="k">Workers 请求（${rangeName}）</div><div class="v">${fmt(t.workers)}</div><div class="d">错误 ${fmt(t.errors)}</div></div>
     <div class="tcard"><div class="k">KV 读 / 写</div><div class="v">${fmt(t.kvR)} / ${fmt(t.kvW)}</div><div class="d">${rangeName}合计</div></div>
@@ -425,13 +427,16 @@ function renderDetail(id) {
   if (!a || !u) { S.view = 'home'; renderHome(); return; }
   if (!u.ok) { $('#main').innerHTML = `<p style="margin:14px 0"><span class="backlink" id="bk">← 返回总览</span></p><div class="err">拉取失败：${esc(u.error)}</div>`; $('#bk').addEventListener('click', () => { S.view = 'home'; renderHome(); }); return; }
   const d = u.usage, inv = d.inventory.ok ? d.inventory.data : {};
-  // Spike check: last trend point vs the average of the previous points
+  // Spike check: last COMPLETE period vs the average of the previous
+  // points. The final trend point is the still-running current period
+  // (today / the current 5-minute bucket), which is naturally small and
+  // would mask a spike — compare the second-to-last point instead.
   let spike = '';
   const tr = d.workers && d.workers.ok ? d.workers.data.trend : null;
-  if (tr && tr.length >= 4) {
-    const last = tr[tr.length - 1].requests, prev = tr.slice(0, -1);
+  if (tr && tr.length >= 5) {
+    const last = tr[tr.length - 2].requests, prev = tr.slice(0, -2);
     const avg = prev.reduce((s, p) => s + p.requests, 0) / prev.length;
-    if (avg > 0 && last >= avg * 2 && last >= 100) spike = ' <span class="tag" title="最近一期请求量达到此前平均的 2 倍以上">⚡ 用量突刺</span>';
+    if (avg > 0 && last >= avg * 2 && last >= 100) spike = ' <span class="tag" title="最近一个完整周期请求量达到此前平均的 2 倍以上">⚡ 用量突刺</span>';
   }
   let html = `<p style="margin:14px 0 4px"><span class="backlink" id="bk">← 返回总览</span> <button class="btn ghost sm" id="expBtn" style="float:right">⬇ 导出报告</button></p>
   <h2 style="font-size:20px">${esc(a.name)} <span class="small muted">${esc(a.accountId)}</span>${spike}</h2>`;
@@ -585,6 +590,7 @@ function initManage(acct, inv) {
   M.db = (M.inv.databases || [])[0]?.id || null;
   M.project = (M.inv.projects || [])[0]?.name || null;
   M.script = (M.inv.scripts || [])[0]?.name || null;
+  M.r2bucket = null; M.r2prefix = ''; // 切账号要一并重置 R2 浏览位置，漏了会拿上个账号的桶名请求新账号
   $$('#mTabs button').forEach((b) => b.addEventListener('click', () => {
     $$('#mTabs button').forEach((x) => x.classList.toggle('on', x === b));
     M.tab = b.dataset.mtab; loadMTab();
@@ -793,25 +799,38 @@ async function refreshKvList(reset) {
   try {
     const r = await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&prefix=${encodeURIComponent($('#kvPrefix')?.value || '')}${M.kvCursor ? '&cursor=' + encodeURIComponent(M.kvCursor) : ''}`);
     const rows = r.keys.map((k) => `<tr><td>${esc(k.name)}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-kv-open="${esc(k.name)}">查看/编辑</button></td></tr>`).join('');
-    if (reset) box.innerHTML = (tableHtml(['键名', '操作'], r.keys.map((k) => `<tr><td>${esc(k.name)}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-kv-open="${esc(k.name)}">查看/编辑</button></td></tr>`)) ) + (r.cursor ? '<div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="kvMore">加载更多</button></div>' : '');
+    if (reset) {
+      box.innerHTML = tableHtml(['键名', '操作'], r.keys.map((k) => `<tr><td>${esc(k.name)}</td><td style="white-space:nowrap"><button class="btn ghost sm" data-kv-open="${esc(k.name)}">查看/编辑</button></td></tr>`)) + (r.cursor ? '<div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="kvMore">加载更多</button></div>' : '');
+    } else {
+      // 加载更多：以前这一分支只推进游标、从不把新页的行插进 DOM，
+      // 第一页之后的键永远看不到。现在追加进表格并换上新的更多按钮。
+      const tbody = box.querySelector('tbody');
+      if (tbody) tbody.insertAdjacentHTML('beforeend', rows);
+      const oldMore = $('#kvMore'); if (oldMore && oldMore.parentElement) oldMore.parentElement.remove();
+      if (r.cursor) box.insertAdjacentHTML('beforeend', '<div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="kvMore">加载更多</button></div>');
+    }
     M.kvCursor = r.cursor;
-    box.querySelectorAll('[data-kv-open]').forEach((b) => b.addEventListener('click', async () => {
-      try { const v = await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&key=${encodeURIComponent(b.dataset.kvOpen)}`); openKvEditor(v.key, v.value, false); }
-      catch (e) { toast(e.message); }
-    }));
+    box.querySelectorAll('[data-kv-open]').forEach((b) => {
+      if (b.dataset.bound) return; // 追加分页时旧行已绑过，别重复绑（会打开两次编辑器）
+      b.dataset.bound = '1';
+      b.addEventListener('click', async () => {
+        try { const v = await api(`/api/kvdata?account=${M.acct.id}&ns=${M.ns}&key=${encodeURIComponent(b.dataset.kvOpen)}`); openKvEditor(v.key, v.value, false, v.binary); }
+        catch (e) { toast(e.message); }
+      });
+    });
     const more = $('#kvMore'); if (more) more.addEventListener('click', () => refreshKvList(false));
   } catch (e) { box.innerHTML = mErr(e); }
 }
-function openKvEditor(key, value, isNew) {
+function openKvEditor(key, value, isNew, binary) {
   const ed = $('#kvEditor'); if (!ed) return;
   ed.innerHTML = `<div style="margin-top:14px"><b>${isNew ? '新建键' : '编辑键'}</b>
   <div class="mrow"><div><label class="mlab">键名</label><input class="minput" id="kvKey" value="${esc(key)}" ${isNew ? '' : 'readonly'}></div></div>
-  <label class="mlab">值</label><textarea class="minput" id="kvVal" rows="7">${esc(value)}</textarea>
+  <label class="mlab">值</label>${binary ? '<p class="hint">⚠ 这个值是二进制数据，下面是它的 base64 形式（只读）。以前按文本打开会把它看坏、存坏；现在保存会按 base64 原样写回字节，不会损坏。</p>' : ''}<textarea class="minput" id="kvVal" rows="7" ${binary ? 'readonly' : ''}>${esc(value)}</textarea>
   <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="kvSaveBtn">保存</button>
   ${isNew ? '' : '<button class="btn danger sm" id="kvDelBtn">删除此键</button>'}<button class="btn ghost sm" id="kvCloseBtn">关闭</button></div></div>`;
   $('#kvCloseBtn').addEventListener('click', () => { ed.innerHTML = ''; });
   $('#kvSaveBtn').addEventListener('click', async () => {
-    try { await api('/api/kvdata', { method: 'PUT', body: JSON.stringify({ account: M.acct.id, ns: M.ns, key: $('#kvKey').value, value: $('#kvVal').value }) }); toast('已保存'); ed.innerHTML = ''; refreshKvList(true); }
+    try { await api('/api/kvdata', { method: 'PUT', body: JSON.stringify({ account: M.acct.id, ns: M.ns, key: $('#kvKey').value, value: $('#kvVal').value, binary: !!binary }) }); toast('已保存'); ed.innerHTML = ''; refreshKvList(true); }
     catch (e) { toast(e.message); }
   });
   const del = $('#kvDelBtn');
@@ -876,7 +895,7 @@ async function loadD1() {
   try {
     const t = await api(`/api/d1sql?account=${M.acct.id}&db=${M.db}`);
     $('#d1Tables').innerHTML = t.tables.map((n) => `<span class="chip2" style="cursor:pointer" data-tbl="${esc(n)}">🗂️ ${esc(n)}</span>`).join('') || '<span class="hint">没有数据表</span>';
-    $$('#d1Tables [data-tbl]').forEach((c) => c.addEventListener('click', () => { $('#sqlBox').value = `SELECT * FROM "${c.dataset.tbl}" LIMIT 50`; }));
+    $$('#d1Tables [data-tbl]').forEach((c) => c.addEventListener('click', () => { $('#sqlBox').value = `SELECT * FROM "${c.dataset.tbl.replace(/"/g, '""')}" LIMIT 50`; }));
   } catch (e) { $('#d1Tables').innerHTML = mErr(e); }
 }
 
@@ -896,7 +915,7 @@ async function loadDeploy() {
   <div><label class="mlab">区域提示（可选）</label><select class="minput" id="r2Loc"><option value="">自动</option><option value="apac">亚太 APAC</option><option value="wnam">北美西部</option><option value="enam">北美东部</option><option value="weur">欧洲西部</option><option value="eeur">欧洲东部</option><option value="oc">大洋洲</option></select></div>
   <div><button class="btn sm" id="r2Create">新建桶</button></div></div>
   <div id="r2List">${(M.inv.buckets || []).map((b) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🪣 ${esc(b.name)}</span><button class="btn danger sm" data-r2-del="${esc(b.name)}">删除空桶</button></div>`).join('') || '<p class="hint">暂无存储桶</p>'}</div>
-  <p class="hint">只能删空桶；桶里文件的管理需要 S3 密钥，不在 API 令牌能力范围内。</p></div>`);
+  <p class="hint">只能删空桶；桶里文件在部署页的 R2 区管理（需先填 S3 密钥）。</p></div>`);
   $('#r2Create').addEventListener('click', async () => {
     try { await api('/api/r2admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, name: $('#r2NewName').value, location: $('#r2Loc').value }) }); toast('桶已新建（刷新详情生效）'); }
     catch (e) { toast(e.message); }
@@ -1107,7 +1126,7 @@ async function loadRules() {
     <label class="mlab">表达式（Cloudflare 规则表达式语法）</label><input class="minput" id="wafExpr" placeholder='如 (http.user_agent contains "sqlmap") 或 (ip.src in {1.2.3.4})'>
     <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="wafSave">保存规则</button><button class="btn ghost sm" id="wafCancelEdit" style="display:none">取消编辑</button></div>
     <p class="hint">注意：免费版域名用不了「只记录 log」动作（Cloudflare 会拒绝），先用很窄的表达式小范围试拦截，或用托管质询。删除规则要点两次确认。</p></div>`;
-    $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
+    $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}" data-rule-enabled="${rule.enabled ? '1' : ''}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
     $$('#rlSets [data-rule-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       const [rs, rule] = cb.dataset.ruleToggle.split('|');
       try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle-rule', ruleset: rs, rule, enabled: cb.checked }) }); toast('规则已更新'); }
@@ -1116,7 +1135,7 @@ async function loadRules() {
     let editing = null;
     $$('#rlSets [data-rule-edit]').forEach((b) => b.addEventListener('click', () => {
       const [rs, rule] = b.dataset.ruleEdit.split('|');
-      editing = { rs, rule };
+      editing = { rs, rule, enabled: b.dataset.ruleEnabled === '1' };
       $('#wafDesc').value = b.dataset.ruleDesc; $('#wafExpr').value = b.dataset.ruleExpr; $('#wafAction').value = b.dataset.ruleAction;
       $('#wafFormTitle').textContent = '编辑 WAF 规则'; $('#wafCancelEdit').style.display = '';
     }));
@@ -1129,7 +1148,7 @@ async function loadRules() {
     $('#wafSave').addEventListener('click', async () => {
       const payload = { account: M.acct.id, zone: M.zone, description: $('#wafDesc').value, expression: $('#wafExpr').value, action: $('#wafAction').value };
       try {
-        if (editing) await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'rule-edit', ruleset: editing.rs, rule: editing.rule }) });
+        if (editing) await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'rule-edit', ruleset: editing.rs, rule: editing.rule, enabled: editing.enabled }) });
         else if (waf) await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'rule-create', ruleset: waf.id }) });
         else await api('/api/rules', { method: 'POST', body: JSON.stringify({ ...payload, what: 'ruleset-create' }) });
         toast('规则已保存'); loadRules();
@@ -1278,7 +1297,7 @@ initManage = function (acct, inv) {
     nav.appendChild(b);
   }
 };
-const zoneOpts = (selId, cur) => `<select class="minput" id="${selId}">${(M.acct.zones || []).map((z) => `<option value="${z.id}" ${z.id === cur ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select>`;
+const zoneOpts = (selId, cur) => `<select class="minput" id="${selId}">${(M.inv.zones || []).map((z) => `<option value="${z.id}" ${z.id === cur ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select>`;
 
 /* ---------- 账号 tab ---------- */
 async function loadAccount() {
@@ -1291,7 +1310,7 @@ async function loadAccount() {
   <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="acInviteBtn">发送邀请</button></div>
   <p class="hint">超级管理员这类高权限角色请谨慎勾选。</p></div>
   <div style="margin-top:16px"><b>账单资料</b><div id="acBilling"><button class="btn ghost sm" id="acBillingBtn">查看账单资料</button></div></div>
-  <div style="margin-top:16px"><b>Cloudflare 官方审计日志</b><div id="acAudit"><button class="btn ghost sm" id="acAuditBtn">加载最近 50 条</button></div></div>
+  <div style="margin-top:16px"><b>Cloudflare 官方审计日志</b><div id="acAudit"><button class="btn ghost sm" id="acAuditBtn">加载审计日志</button></div></div>
   <div style="margin-top:16px"><b>Web Analytics 站点</b><div id="acRum"><button class="btn ghost sm" id="acRumBtn">查看站点</button></div></div>
   <div style="margin-top:16px"><b>账号 API 令牌</b><p class="hint">账号级令牌（和你现在登录面板用的用户令牌是两套）。新建的令牌值只显示一次。</p><div id="acTokens"><p class="hint"><span class="spin"></span> 加载令牌…</p></div>
   <div class="mrow"><div><label class="mlab">新建令牌名</label><input class="minput" id="acTokName" placeholder="如 给 CI 用"></div></div>
@@ -1505,7 +1524,7 @@ function renderWkAdv() {
   </div>
   <div id="wkCodeOut"></div>
   <div style="margin-top:10px"><b>上传新代码</b>
-  <textarea class="minput" id="wkCodeTxt" rows="8" placeholder="把新的 Worker 代码粘贴到这里（部署时会自动保留现有绑定）"></textarea>
+  <textarea class="minput" id="wkCodeTxt" rows="8" placeholder="把新的 Worker 代码粘贴到这里（仅支持单文件脚本；部署时会自动保留现有绑定，secret 类绑定由 Cloudflare 原样保留）"></textarea>
   <div class="btns" style="justify-content:flex-start"><label class="small"><input type="checkbox" id="wkModule"> ES 模块格式（export default）</label><button class="btn sm" id="wkUpload">上传并部署</button></div></div>
   <div style="margin-top:10px"><b>域名路由（Workers Routes）</b>
   <div class="mrow"><div><label class="mlab">域名</label>${zoneOpts('wkRouteZone', M.zone)}</div>
@@ -1566,8 +1585,6 @@ const _ldOrig = loadDeploy;
 loadDeploy = async function () { await _ldOrig(); renderR2Objects(); };
 function renderR2Objects() {
   const list = $('#r2List'); if (!list || $('#r2Obj')) return;
-  $$('#r2List [data-r2-del]').forEach(() => {});
-  list.querySelectorAll('div').forEach(() => {});
   const rows = list.children;
   // add a 文件 button next to each bucket row
   (M.inv.buckets || []).forEach((b, i) => {

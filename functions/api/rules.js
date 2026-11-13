@@ -58,18 +58,20 @@ export async function onRequestPost({ request, env }) {
     const b = await readBody(request);
     const acct = await resolveAccount(env, b.account);
     if (b.what === 'toggle-rule') {
-      // Flip one rule's enabled flag: fetch ruleset, patch the rule, put it back.
-      const full = await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}`);
-      const rs = full.result;
-      const rules = (rs.rules || []).map((r) => (r.id === b.rule ? { ...r, enabled: !!b.enabled } : r));
-      await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}`, {
-        method: 'PUT',
-        body: JSON.stringify({ name: rs.name, kind: rs.kind, phase: rs.phase, rules }),
+      // Flip one rule's enabled flag with a single-rule PATCH. The old flow
+      // GET-ed the whole ruleset and PUT it back: read-only fields on each
+      // rule (version, last_updated) rode along and could be rejected, and
+      // anyone else's edits between the GET and PUT were silently lost.
+      await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/rulesets/${encodeURIComponent(b.ruleset)}/rules/${encodeURIComponent(b.rule)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: !!b.enabled }),
       });
+      await addAudit(env, a.sess.user, 'rule.toggle', `${acct.name} · ${b.enabled ? '启用' : '停用'}规则 ${b.rule}`);
       return json({ ok: true });
     }
     if (b.what === 'pagerule-toggle') {
-      await cfApi(acct, `/zones/${b.zone}/pagerules/${b.id}`, { method: 'PATCH', body: JSON.stringify({ status: b.enabled ? 'active' : 'disabled' }) });
+      await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/pagerules/${encodeURIComponent(b.id)}`, { method: 'PATCH', body: JSON.stringify({ status: b.enabled ? 'active' : 'disabled' }) });
+      await addAudit(env, a.sess.user, 'pagerule.toggle', `${acct.name} · ${b.enabled ? '启用' : '停用'}页面规则 ${b.id}`);
       return json({ ok: true });
     }
     if (b.what === 'rule-create' || b.what === 'rule-edit') {
@@ -77,11 +79,15 @@ export async function onRequestPost({ request, env }) {
       const expression = String(b.expression || '').trim();
       if (!expression) return json({ error: '规则表达式不能为空' }, 400);
       if (!ACTIONS.includes(b.action)) return json({ error: '动作只能是 block/challenge/js_challenge/managed_challenge/log' }, 400);
-      const rule = { expression, action: b.action, description: String(b.description || '').slice(0, 100), enabled: b.enabled !== false };
+      const rule = { expression, action: b.action, description: String(b.description || '').slice(0, 100) };
+      // 编辑时前端不传 enabled 就不要带这个字段：以前共用 `!== false`
+      // 默认 true，只改描述/表达式就把故意停用的规则悄悄重新启用了
+      if (b.what === 'rule-create') rule.enabled = b.enabled !== false;
+      else if (b.enabled !== undefined) rule.enabled = !!b.enabled;
       if (b.what === 'rule-create') {
-        await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}/rules`, { method: 'POST', body: JSON.stringify(rule) });
+        await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/rulesets/${encodeURIComponent(b.ruleset)}/rules`, { method: 'POST', body: JSON.stringify(rule) });
       } else {
-        await cfApi(acct, `/zones/${b.zone}/rulesets/${b.ruleset}/rules/${b.rule}`, { method: 'PATCH', body: JSON.stringify(rule) });
+        await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/rulesets/${encodeURIComponent(b.ruleset)}/rules/${encodeURIComponent(b.rule)}`, { method: 'PATCH', body: JSON.stringify(rule) });
       }
       await addAudit(env, a.sess.user, 'rule.' + b.what, `${acct.name} · ${rule.action} ${rule.expression.slice(0, 80)}`);
       return json({ ok: true });
@@ -90,7 +96,7 @@ export async function onRequestPost({ request, env }) {
       const ACTIONS = ['block', 'challenge', 'js_challenge', 'managed_challenge', 'log'];
       const expression = String(b.expression || '').trim();
       if (!expression || !ACTIONS.includes(b.action)) return json({ error: '表达式或动作不对' }, 400);
-      await cfApi(acct, `/zones/${b.zone}/rulesets`, {
+      await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/rulesets`, {
         method: 'POST',
         body: JSON.stringify({
           name: 'default', kind: 'zone', phase: 'http_request_firewall_custom',
@@ -111,10 +117,11 @@ export async function onRequestPost({ request, env }) {
       } else if (b.kind === 'cache') action = { id: 'cache_level', value: String(b.cacheLevel || 'cache_everything') };
       else if (b.kind === 'ssl') action = { id: 'ssl', value: String(b.sslMode || 'flexible') };
       else return json({ error: '未知规则类型' }, 400);
-      await cfApi(acct, `/zones/${b.zone}/pagerules`, {
+      await cfApi(acct, `/zones/${encodeURIComponent(b.zone)}/pagerules`, {
         method: 'POST',
         body: JSON.stringify({ targets: [{ target: 'url', constraint: { operator: 'matches', value: urlPattern } }], actions: [action], status: 'active' }),
       });
+      await addAudit(env, a.sess.user, 'pagerule.create', `${acct.name} · 新建页面规则 ${urlPattern.slice(0, 80)}`);
       return json({ ok: true });
     }
     return json({ error: '未知操作' }, 400);
@@ -127,11 +134,11 @@ export async function onRequestDelete({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     if (url.searchParams.get('what') === 'rule') {
-      await cfApi(acct, `/zones/${url.searchParams.get('zone')}/rulesets/${url.searchParams.get('ruleset')}/rules/${url.searchParams.get('rule')}`, { method: 'DELETE' });
+      await cfApi(acct, `/zones/${encodeURIComponent(url.searchParams.get('zone'))}/rulesets/${encodeURIComponent(url.searchParams.get('ruleset'))}/rules/${encodeURIComponent(url.searchParams.get('rule'))}`, { method: 'DELETE' });
       await addAudit(env, a.sess.user, 'rule.delete', `${acct.name} · 删除 WAF 规则`);
       return json({ ok: true });
     }
-    await cfApi(acct, `/zones/${url.searchParams.get('zone')}/pagerules/${url.searchParams.get('id')}`, { method: 'DELETE' });
+    await cfApi(acct, `/zones/${encodeURIComponent(url.searchParams.get('zone'))}/pagerules/${encodeURIComponent(url.searchParams.get('id'))}`, { method: 'DELETE' });
     await addAudit(env, a.sess.user, 'pagerule.delete', `${acct.name} · 删除页面规则`);
     return json({ ok: true });
   } catch (e) { return fail(e); }

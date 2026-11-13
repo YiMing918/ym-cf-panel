@@ -5,7 +5,12 @@ import { addAudit } from '../_store.js';
 // KV bulk export (all keys+values of a namespace as JSON) + bulk import.
 // Needs Workers KV Storage Edit for import; export uses the same data APIs.
 const MAX_KEYS = 1000; // import cap: enforced with an explicit 400 error below, not silent
-const MAX_EXPORT_KEYS = 10000; // export guard (cursor loop): 10 pages x 1000; excess is flagged via `truncated`, never silent
+// Export guard: values are read with the KV bulk-get endpoint (100 keys
+// per subrequest). 4000 keys ≈ 40 bulk calls + a few list pages, which
+// stays inside the free plan's 50-subrequest budget; the old per-key
+// fetch died around key #44 and made export unusable for any real
+// namespace. Excess is flagged via `truncated`, never silent.
+const MAX_EXPORT_KEYS = 4000;
 
 export async function onRequestGet({ request, env }) {
   const a = await requireAuth(env, request); if (a.error) return a.error;
@@ -13,7 +18,7 @@ export async function onRequestGet({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     const ns = url.searchParams.get('ns');
-    const base = `/accounts/${acct.accountId}/storage/kv/namespaces/${ns}`;
+    const base = `/accounts/${acct.accountId}/storage/kv/namespaces/${encodeURIComponent(ns)}`;
     const names = [];
     let cursor = '';
     let exportTruncated = false;
@@ -27,23 +32,29 @@ export async function onRequestGet({ request, env }) {
     if (exportTruncated) names.length = MAX_EXPORT_KEYS;
     const entries = [];
     let bytes = 0;
-    for (const name of names) {
-      let r;
+    // Bulk get: up to 100 keys per call. Same loud-failure contract as
+    // before: any batch failure or a listed key missing from the result
+    // aborts the whole export with a 502 — a failed read must NEVER be
+    // exported as an empty value (restoring it would wipe the real one).
+    for (let i = 0; i < names.length; i += 100) {
+      const chunk = names.slice(i, i + 100);
+      let d;
       try {
-        r = await fetch(`https://api.cloudflare.com/client/v4${base}/values/${encodeURIComponent(name)}`, { headers: { 'Authorization': 'Bearer ' + acct.token } });
-      } catch {
-        return json({ error: `读取键「${name}」时网络失败，导出已终止：这份备份不完整，请勿使用` }, 502);
+        d = await cfApi(acct, `${base}/bulk/get`, { method: 'POST', body: JSON.stringify({ keys: chunk }) });
+      } catch (e) {
+        return json({ error: `批量读取键值失败（${String(e.message || e).slice(0, 120)}），导出已终止：这份备份不完整，请勿使用` }, 502);
       }
-      // A failed read must NEVER be exported as an empty value: restoring
-      // such a backup would silently overwrite the real value with ''.
-      // Fail the whole export loudly instead of producing a broken backup.
-      if (!r.ok) {
-        return json({ error: `读取键「${name}」失败（HTTP ${r.status}），导出已终止：这份备份不完整，请勿使用` }, 502);
+      const map = d.result || {};
+      for (const name of chunk) {
+        const value = map[name];
+        if (value === undefined || value === null) {
+          return json({ error: `读取键「${name}」失败，导出已终止：这份备份不完整，请勿使用` }, 502);
+        }
+        const v = String(value);
+        bytes += v.length;
+        if (bytes > 4 * 1024 * 1024) return json({ error: '数据总量超过 4MB，请分批处理' }, 413);
+        entries.push({ name, value: v });
       }
-      const value = await r.text();
-      bytes += value.length;
-      if (bytes > 4 * 1024 * 1024) return json({ error: '数据总量超过 4MB，请分批处理' }, 413);
-      entries.push({ name, value });
     }
     return json({ entries, total: names.length, truncated: exportTruncated });
   } catch (e) { return fail(e); }

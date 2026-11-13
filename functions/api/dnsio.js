@@ -1,5 +1,6 @@
 import { requireAuth, json, readBody } from '../_auth.js';
 import { resolveAccount, cfApi, fail } from '../_manage.js';
+import { addAudit } from '../_store.js';
 
 // DNS export (BIND text) + import. Needs Zone → DNS → Edit.
 export async function onRequestGet({ request, env }) {
@@ -28,6 +29,7 @@ export async function onRequestPost({ request, env }) {
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.success === false) throw new Error((data.errors && data.errors[0] && data.errors[0].message) || ('HTTP ' + r.status));
+    await addAudit(env, a.sess.user, 'dns.import', `${acct.name} · 导入 ${data.result && data.result.total_records_added} 条`);
     return json({ ok: true, added: data.result && data.result.total_records_added, parsed: data.result && data.result.total_records_parsed });
   } catch (e) { return fail(e); }
 }

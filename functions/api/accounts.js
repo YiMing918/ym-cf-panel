@@ -51,7 +51,7 @@ export async function onRequestPut({ request, env }) {
   const list = await getAccounts(env);
   const acct = list.find((x) => x.id === id);
   if (!acct) return json({ error: '账号不存在' }, 404);
-  if (name) acct.name = String(name).trim();
+  if (name) { const nn = String(name).trim(); if (!nn) return json({ error: '名称不能为空' }, 400); acct.name = nn; }
   let idChanged = false;
   if (accountId) {
     const nid = String(accountId).trim();

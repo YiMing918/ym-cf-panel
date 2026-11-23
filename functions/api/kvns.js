@@ -23,7 +23,9 @@ export async function onRequestPut({ request, env }) {
   try {
     const b = await readBody(request);
     const acct = await resolveAccount(env, b.account);
-    await cfApi(acct, `${base(acct)}/${encodeURIComponent(b.ns)}`, { method: 'PUT', body: JSON.stringify({ title: String(b.title || '').trim() }) });
+    const title = String(b.title || '').trim();
+    if (!title) return json({ error: '命名空间名称不能为空' }, 400);
+    await cfApi(acct, `${base(acct)}/${encodeURIComponent(b.ns)}`, { method: 'PUT', body: JSON.stringify({ title }) });
     await addAudit(env, a.sess.user, 'kvns.put', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }

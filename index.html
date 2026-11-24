@@ -270,6 +270,7 @@ function openSettings() {
   $('#setName').value = S.settings.panelName || '';
   $('#setPublic').checked = !!S.settings.publicSummary;
   $('#setOldPwd').value = ''; $('#setNewPwd').value = '';
+  const ts = $('#setTheme'); if (ts) ts.value = localStorage.getItem('ymcfp_theme') || 'auto';
   open('#mSettings');
 }
 $('#setSave').addEventListener('click', async () => {

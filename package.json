@@ -8,7 +8,7 @@
     "test": "node tests/kvio-backup.mjs && node tests/login-ratelimit.mjs && node tests/secrets.mjs && node tests/store-concurrency.mjs && node tests/walk-fixes.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.25.0",
-    "wrangler": "3.114.17"
+    "esbuild": "^0.25.0",
+    "wrangler": "^3.114.17"
   }
 }

@@ -87,6 +87,9 @@ export async function onRequestGet({ request, env }) {
     if (!cred) return json({ error: '这个账号还没填 R2 的 S3 密钥（在 CF 后台 R2 页右上角「管理 R2 API 令牌」创建）' }, 400);
     const acct = await resolveAccount(env, panelId);
     const bucket = url.searchParams.get('bucket');
+    // 桶名与 r2admin 同口径校验：未经校验的桶名拼进签名路径，
+    // 含 / ? 的值会改变请求路径结构（L10）
+    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(bucket || '')) return json({ error: '桶名不合法' }, 400);
     const prefix = url.searchParams.get('prefix') || '';
     if (url.searchParams.get('what') === 'download') {
       const link = await presign(acct, cred, bucket, url.searchParams.get('key'), 3600);
@@ -123,7 +126,7 @@ export async function onRequestGet({ request, env }) {
       const nextM = text.match(/<NextContinuationToken>([^<]*)<\/NextContinuationToken>/);
       if (!isTrunc || !nextM) break;
       if (pages >= 50) { truncated = true; break; }
-      continuation = nextM[1];
+      continuation = xmlDec(nextM[1]);
     }
     return json({ folders, objects, prefix, total: objects.length + folders.length, truncated });
   } catch (e) { return fail(e); }
@@ -146,6 +149,7 @@ export async function onRequestPost({ request, env }) {
     const cred = await getCred(env, b.account);
     if (!cred) return json({ error: '还没填 S3 密钥' }, 400);
     const acct = await resolveAccount(env, b.account);
+    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(b.bucket || '')) return json({ error: '桶名不合法' }, 400);
     if (b.what === 'upload') {
       const dataStr = String(b.data || '');
       // 先按 base64 字符串长度拦（解码后 4MB 上限对应的编码长度），
@@ -169,6 +173,7 @@ export async function onRequestDelete({ request, env }) {
     const cred = await getCred(env, url.searchParams.get('account'));
     if (!cred) return json({ error: '还没填 S3 密钥' }, 400);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
+    if (!/^[a-z0-9][a-z0-9-]{2,62}$/.test(url.searchParams.get('bucket') || '')) return json({ error: '桶名不合法' }, 400);
     const resp = await s3(acct, cred, 'DELETE', objPath(url.searchParams.get('bucket'), url.searchParams.get('key')));
     if (!resp.ok && resp.status !== 204) return json({ error: `删除失败 ${resp.status}` }, 502);
     await addAudit(env, a.sess.user, 'r2.delete', `${url.searchParams.get('bucket')}/${url.searchParams.get('key')}`);

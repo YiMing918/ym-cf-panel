@@ -147,7 +147,7 @@
   <div class="fld"><label>修改管理员密码（留空不改；先填原密码）</label><input id="setOldPwd" type="password" placeholder="原密码"></div>
   <div class="fld"><input id="setNewPwd" type="password" placeholder="新密码（至少 10 位）"></div>
   <div class="fld"><label>界面主题（保存在这台设备上）</label><select id="setTheme"><option value="light">浅色</option><option value="dark">深色</option><option value="auto">跟随系统</option></select></div>
-  <p class="hint">YM CF 面板 v4.0</p>
+  <p class="hint">YM CF 面板 v4.0.15</p>
   <div class="btns"><button class="btn ghost" data-close>取消</button><button class="btn" id="setSave">保存</button></div>
 </div></div>
 
@@ -271,6 +271,8 @@ function openSettings() {
   $('#setPublic').checked = !!S.settings.publicSummary;
   $('#setOldPwd').value = ''; $('#setNewPwd').value = '';
   const ts = $('#setTheme'); if (ts) ts.value = localStorage.getItem('ymcfp_theme') || 'auto';
+  // 主题快照：弹窗里改主题只预览，保存才落盘；没保存就关弹窗时回滚（L12）
+  S.themeBefore = localStorage.getItem('ymcfp_theme');
   open('#mSettings');
 }
 $('#setSave').addEventListener('click', async () => {
@@ -279,6 +281,9 @@ $('#setSave').addEventListener('click', async () => {
   try {
     const r = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
     S.settings = r.settings; $('#panelName').textContent = r.settings.panelName;
+    const ts3 = $('#setTheme');
+    if (ts3) { if (ts3.value === 'auto') localStorage.removeItem('ymcfp_theme'); else localStorage.setItem('ymcfp_theme', ts3.value); }
+    S.themeBefore = undefined; applyTheme();
     $('#mSettings').classList.remove('open'); toast('已保存');
   } catch (e) { toast(e.message); }
 });
@@ -662,7 +667,7 @@ async function refreshDnsList() {
     const r = await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}`);
     box.innerHTML = (r.records.length ? `<div class="btns" style="justify-content:flex-start"><button class="btn danger sm" id="dnsBatchDel">删除所选</button><span class="hint">勾选多条可批量删除</span></div>` : '')
       + (tableHtml(['', '类型', '名称', '内容', 'TTL', '代理', '操作'], r.records.map((x) => `<tr>
-      <td><input type="checkbox" data-dns-check="${x.id}"></td>
+      <td><input type="checkbox" data-dns-check="${esc(x.id)}"></td>
       <td><b>${esc(x.type)}</b></td><td>${esc(x.name)}</td><td>${esc(x.content)}</td><td>${x.ttl === 1 ? '自动' : x.ttl}</td><td>${x.proxied ? '🟠 开' : '—'}</td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-dns-edit="${x.id}">编辑</button> <button class="btn danger sm" data-dns-del="${x.id}">删除</button></td></tr>`))
       || '<p class="hint">暂无记录</p>');
@@ -990,7 +995,7 @@ async function refreshDepList() {
     const r = await api(`/api/pagesops?account=${M.acct.id}&project=${encodeURIComponent(M.project)}`);
     box.innerHTML = tableHtml(['时间', '环境', '状态', '提交', '操作'], r.deployments.map((d) => `<tr>
       <td>${esc((d.created || '').slice(0, 16).replace('T', ' '))}</td><td>${esc(d.env || '')}</td><td>${esc(d.status || '')}</td><td>${esc(d.source || '')}</td>
-      <td style="white-space:nowrap">${d.env === 'production' ? `<button class="btn ghost sm" data-rb="${d.id}">回滚到此版</button>` : ''} ${d.status === 'failure' ? `<button class="btn ghost sm" data-rt="${d.id}">重试</button>` : ''} ${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">打开</a>` : ''}</td></tr>`))
+      <td style="white-space:nowrap">${d.env === 'production' ? `<button class="btn ghost sm" data-rb="${esc(d.id)}">回滚到此版</button>` : ''} ${d.status === 'failure' ? `<button class="btn ghost sm" data-rt="${esc(d.id)}">重试</button>` : ''} ${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">打开</a>` : ''}</td></tr>`))
       || '<p class="hint">暂无部署记录</p>';
     box.querySelectorAll('[data-rb]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api('/api/pagesops', { method: 'POST', body: JSON.stringify({ account: M.acct.id, project: M.project, deployment: b.dataset.rb, action: 'rollback' }) }); toast('已回滚'); refreshDepList(); }
@@ -1010,7 +1015,7 @@ async function refreshWList() {
     for (const d of r.deployments) for (const v of d.versions) cur[v.id] = v.pct;
     box.innerHTML = (r.deployments.length ? `<p class="hint">当前部署：${r.deployments.map((d) => `${esc(d.created?.slice(0, 16).replace('T', ' ') || '')}（${d.versions.map((v) => '版本 ' + esc(v.id.slice(0, 8)) + ' · ' + v.pct + '%').join('，')}）`).join('；')}</p>` : '')
       + tableHtml(['版本', '创建时间', '状态', '操作'], r.versions.map((v) => `<tr><td>#${v.number ?? ''} <span class="small muted">${esc(v.id.slice(0, 8))}</span></td><td>${esc((v.created || '').slice(0, 16).replace('T', ' '))}</td><td>${cur[v.id] ? '🟢 已部署 ' + cur[v.id] + '%' : ''}</td>
-      <td>${cur[v.id] === 100 ? '' : `<button class="btn ghost sm" data-wdep="${v.id}">部署此版本</button>`}</td></tr>`)) || '<p class="hint">暂无版本</p>';
+      <td>${cur[v.id] === 100 ? '' : `<button class="btn ghost sm" data-wdep="${esc(v.id)}">部署此版本</button>`}</td></tr>`)) || '<p class="hint">暂无版本</p>';
     box.querySelectorAll('[data-wdep]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api('/api/workersops', { method: 'POST', body: JSON.stringify({ account: M.acct.id, script: M.script, version: b.dataset.wdep }) }); toast('已部署该版本'); refreshWList(); }
       catch (e) { toast(e.message); }
@@ -1060,10 +1065,24 @@ const themeSel = $('#setTheme');
 if (themeSel) {
   themeSel.value = localStorage.getItem('ymcfp_theme') || 'auto';
   themeSel.addEventListener('change', () => {
-    if (themeSel.value === 'auto') localStorage.removeItem('ymcfp_theme');
-    else localStorage.setItem('ymcfp_theme', themeSel.value);
-    applyTheme();
+    // 只预览不落盘：保存时才写 localStorage（见 setSave），取消/点遮罩
+    // 关闭时按 openSettings 存的快照回滚，与其他字段口径一致（L12）
+    const v = themeSel.value;
+    document.documentElement.dataset.theme = v === 'auto'
+      ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : v;
   });
+  const settingsMask = $('#mSettings');
+  if (settingsMask) {
+    new MutationObserver(() => {
+      if (!settingsMask.classList.contains('open') && S.themeBefore !== undefined) {
+        if (S.themeBefore === null) localStorage.removeItem('ymcfp_theme');
+        else localStorage.setItem('ymcfp_theme', S.themeBefore);
+        themeSel.value = S.themeBefore || 'auto';
+        applyTheme();
+        S.themeBefore = undefined;
+      }
+    }).observe(settingsMask, { attributes: true, attributeFilter: ['class'] });
+  }
 }
 
 /* ----- Zone settings + DNSSEC + certificates ----- */
@@ -1152,7 +1171,7 @@ async function loadRules() {
     <label class="mlab">表达式（Cloudflare 规则表达式语法）</label><input class="minput" id="wafExpr" placeholder='如 (http.user_agent contains "sqlmap") 或 (ip.src in {1.2.3.4})'>
     <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="wafSave">保存规则</button><button class="btn ghost sm" id="wafCancelEdit" style="display:none">取消编辑</button></div>
     <p class="hint">注意：免费版域名用不了「只记录 log」动作（Cloudflare 会拒绝），先用很窄的表达式小范围试拦截，或用托管质询。删除规则要点两次确认。</p></div>`;
-    $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}" data-rule-enabled="${rule.enabled ? '1' : ''}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : '<p class="hint">暂无规则</p>'}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
+    $('#rlSets').innerHTML = (r.rulesets.length ? r.rulesets.map((rs) => `<div style="margin-top:8px"><b>${esc(rs.label)}</b>${rs.rules.length ? rs.rules.map((rule) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(rule.description)}<br><span class="small muted">${esc(rule.action)} · ${esc(rule.expression)}</span></span><label class="small"><input type="checkbox" data-rule-toggle="${esc(rs.id)}|${esc(rule.id)}" ${rule.enabled ? 'checked' : ''}> 启用</label>${rs.phase === 'http_request_firewall_custom' ? `<button class="btn ghost sm" data-rule-edit="${esc(rs.id)}|${esc(rule.id)}" data-rule-desc="${esc(rule.description)}" data-rule-expr="${esc(rule.expression)}" data-rule-action="${esc(rule.action)}" data-rule-enabled="${rule.enabled ? '1' : ''}">编辑</button><button class="btn danger sm" data-rule-del="${esc(rs.id)}|${esc(rule.id)}">删</button>` : ''}</div>`).join('') : (rs.rulesError ? `<p class="hint">⚠️ 规则读取失败：${esc(rs.rulesError)}</p>` : '<p class="hint">暂无规则</p>')}</div>`).join('') : '<p class="hint">没有读到规则集（可能缺 Rulesets 权限）。</p>') + ruleForm;
     $$('#rlSets [data-rule-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       const [rs, rule] = cb.dataset.ruleToggle.split('|');
       try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'toggle-rule', ruleset: rs, rule, enabled: cb.checked }) }); toast('规则已更新'); }
@@ -1187,7 +1206,7 @@ async function refreshPrList() {
   const box = $('#prList'); if (!box) return;
   try {
     const r = await api(`/api/rules?account=${M.acct.id}&zone=${M.zone}&what=pagerules`);
-    box.innerHTML = r.rules.length ? r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${x.targets.map(esc).join('、')}<br><span class="small muted">${x.actions.map(esc).join('、')} · 优先级 ${x.priority}</span></span><label class="small"><input type="checkbox" data-pr-toggle="${x.id}" ${x.status === 'active' ? 'checked' : ''}> 启用</label><button class="btn danger sm" data-pr-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无页面规则</p>';
+    box.innerHTML = r.rules.length ? r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${x.targets.map(esc).join('、')}<br><span class="small muted">${x.actions.map(esc).join('、')} · 优先级 ${x.priority}</span></span><label class="small"><input type="checkbox" data-pr-toggle="${esc(x.id)}" ${x.status === 'active' ? 'checked' : ''}> 启用</label><button class="btn danger sm" data-pr-del="${esc(x.id)}">删除</button></div>`).join('') : '<p class="hint">暂无页面规则</p>';
     box.querySelectorAll('[data-pr-toggle]').forEach((cb) => cb.addEventListener('change', async () => {
       try { await api('/api/rules', { method: 'POST', body: JSON.stringify({ account: M.acct.id, zone: M.zone, what: 'pagerule-toggle', id: cb.dataset.prToggle, enabled: cb.checked }) }); toast('已更新'); }
       catch (e) { toast(e.message); refreshPrList(); }
@@ -1214,7 +1233,7 @@ async function loadEmail() {
     $('#emBody').innerHTML = `
     <p class="hint">邮件路由状态：${r.enabled ? '🟢 已启用' : '⚪ 未启用'}${r.synced ? ' · DNS 记录已同步' : ''} <button class="btn ghost sm" id="emToggle">${r.enabled ? '关闭邮件路由' : '启用邮件路由'}</button></p>
     <div style="margin-top:10px"><b>转发规则</b>
-    ${r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(x.match)} → ${x.forwardTo.map(esc).join('、')}<span class="small muted"> ${x.enabled ? '' : '（已停用）'}</span></span><button class="btn danger sm" data-em-del="${x.id}">删除</button></div>`).join('') || '<p class="hint">暂无规则</p>'}
+    ${r.rules.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">${esc(x.match)} → ${x.forwardTo.map(esc).join('、')}<span class="small muted"> ${x.enabled ? '' : '（已停用）'}</span></span><button class="btn danger sm" data-em-del="${esc(x.id)}">删除</button></div>`).join('') || '<p class="hint">暂无规则</p>'}
     ${r.catchall ? `<p class="hint" style="margin-top:6px">全部接收（catch-all）：${r.catchall.enabled ? '开' : '关'}${r.catchall.forwardTo.length ? ' → ' + r.catchall.forwardTo.map(esc).join('、') : ''}</p>` : ''}
     </div>
     <div class="mrow"><div><label class="mlab">新规则：接收地址（本域名）</label><input class="minput" id="emFrom" placeholder="me@${esc(zoneName)}"></div>
@@ -1260,7 +1279,7 @@ async function refreshTnList() {
   try {
     const r = await api(`/api/tunnels?account=${M.acct.id}`);
     box.innerHTML = r.tunnels.length ? r.tunnels.map((t) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b>${esc(t.name)}</b> <span class="tag">${esc(t.status || '')}</span> <span class="hint">连接 ${t.connections} · 建于 ${esc(String(t.created || '').slice(0, 10))}</span>
-    <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" data-tn-view="${t.id}">主机名规则</button><button class="btn danger sm" data-tn-del="${t.id}">删除隧道</button></div>
+    <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" data-tn-view="${esc(t.id)}">主机名规则</button><button class="btn danger sm" data-tn-del="${esc(t.id)}">删除隧道</button></div>
     <div id="tnDetail-${t.id}"></div></div>`).join('') : '<p class="hint">这个账号还没有隧道。</p>';
     box.querySelectorAll('[data-tn-view]').forEach((b) => b.addEventListener('click', () => loadTnDetail(b.dataset.tnView)));
     box.querySelectorAll('[data-tn-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
@@ -1323,7 +1342,7 @@ initManage = function (acct, inv) {
     nav.appendChild(b);
   }
 };
-const zoneOpts = (selId, cur) => `<select class="minput" id="${selId}">${(M.inv.zones || []).map((z) => `<option value="${z.id}" ${z.id === cur ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select>`;
+const zoneOpts = (selId, cur) => `<select class="minput" id="${selId}">${(M.inv.zones || []).map((z) => `<option value="${esc(z.id)}" ${z.id === cur ? 'selected' : ''}>${esc(z.name)}</option>`).join('')}</select>`;
 
 /* ---------- 账号 tab ---------- */
 async function loadAccount() {
@@ -1378,12 +1397,12 @@ async function loadMembers() {
   try {
     const r = await api(`/api/accountadmin?account=${M.acct.id}&what=members`);
     M.roles = r.roles || [];
-    box.innerHTML = r.members.length ? r.members.map((m) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">👤 ${esc(m.email)} <span class="tag">${esc(m.status)}</span><br><span class="small muted">${m.roles.map((x) => esc(x.name)).join('、')}</span></span><button class="btn danger sm" data-member-del="${m.id}">移除</button></div>`).join('') : '<p class="hint">暂无成员</p>';
+    box.innerHTML = r.members.length ? r.members.map((m) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">👤 ${esc(m.email)} <span class="tag">${esc(m.status)}</span><br><span class="small muted">${m.roles.map((x) => esc(x.name)).join('、')}</span></span><button class="btn danger sm" data-member-del="${esc(m.id)}">移除</button></div>`).join('') : '<p class="hint">暂无成员</p>';
     $$('#acMembers [data-member-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/accountadmin?account=${M.acct.id}&member=${b.dataset.memberDel}`, { method: 'DELETE' }); toast('成员已移除'); loadMembers(); }
       catch (e) { toast(e.message); }
     })));
-    $('#acRoles').innerHTML = M.roles.map((role) => `<label class="chip2" style="cursor:pointer"><input type="checkbox" data-role="${role.id}"> ${esc(role.name)}</label>`).join('') || '<span class="hint">角色列表读不到（缺成员权限）</span>';
+    $('#acRoles').innerHTML = M.roles.map((role) => `<label class="chip2" style="cursor:pointer"><input type="checkbox" data-role="${esc(role.id)}"> ${esc(role.name)}</label>`).join('') || '<span class="hint">角色列表读不到（缺成员权限）</span>';
     $('#acInviteBtn').onclick = async () => {
       const roleIds = $$('#acRoles [data-role]:checked').map((c) => c.dataset.role);
       try { await api('/api/accountadmin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'invite', email: $('#acInviteEmail').value, roleIds }) }); toast('邀请已发送'); loadMembers(); }
@@ -1395,7 +1414,7 @@ async function loadAcctTokens() {
   const box = $('#acTokens'); if (!box) return;
   try {
     const r = await api(`/api/accttokens?account=${M.acct.id}`);
-    box.innerHTML = r.tokens.length ? r.tokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)} <span class="tag">${esc(t.status)}</span><br><span class="small muted">创建 ${esc(String(t.issued || '').slice(0, 10))}${t.lastUsed ? ' · 最近使用 ' + esc(String(t.lastUsed).slice(0, 10)) : ''} · ${t.policies} 条策略</span></span><button class="btn danger sm" data-tok-del="${t.id}">删除</button></div>`).join('') : '<p class="hint">暂无账号级令牌</p>';
+    box.innerHTML = r.tokens.length ? r.tokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)} <span class="tag">${esc(t.status)}</span><br><span class="small muted">创建 ${esc(String(t.issued || '').slice(0, 10))}${t.lastUsed ? ' · 最近使用 ' + esc(String(t.lastUsed).slice(0, 10)) : ''} · ${t.policies} 条策略</span></span><button class="btn danger sm" data-tok-del="${esc(t.id)}">删除</button></div>`).join('') : '<p class="hint">暂无账号级令牌</p>';
     $$('#acTokens [data-tok-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/accttokens?account=${M.acct.id}&id=${b.dataset.tokDel}`, { method: 'DELETE' }); toast('令牌已删除'); loadAcctTokens(); }
       catch (e) { toast(e.message); }
@@ -1444,7 +1463,7 @@ async function loadAccess() {
     const r = await api(`/api/access?account=${M.acct.id}`);
     box.innerHTML = (r.apps.length ? r.apps.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛡 ${esc(x.name)}<br><span class="small muted">${esc(x.domain)} · ${esc(x.type)}${x.policies.length ? ' · 策略 ' + x.policies.map(esc).join('、') : ''}</span></span><button class="btn danger sm" data-app-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无 Access 应用</p>')
       + `<div class="mrow"><div><label class="mlab">新应用名</label><input class="minput" id="accAppName" placeholder="如 内部后台"></div><div><label class="mlab">域名</label><input class="minput" id="accAppDomain" placeholder="admin.example.com"></div><div><label class="mlab">允许登录的邮箱（逗号分隔）</label><input class="minput" id="accAppEmails" placeholder="me@example.com"></div><div><button class="btn sm" id="accAppCreate">新建应用</button></div></div>`
-      + `<div style="margin-top:10px"><b>服务令牌</b>${r.serviceTokens.length ? r.serviceTokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)}<br><span class="small muted">Client ID ${esc(t.clientId)}</span></span><button class="btn danger sm" data-svc-del="${t.id}">删除</button></div>`).join('') : '<p class="hint">暂无服务令牌</p>'}
+      + `<div style="margin-top:10px"><b>服务令牌</b>${r.serviceTokensError ? `<p class="hint">⚠️ 服务令牌读取失败：${esc(r.serviceTokensError)}</p>` : ''}${r.serviceTokens.length ? r.serviceTokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)}<br><span class="small muted">Client ID ${esc(t.clientId)}</span></span><button class="btn danger sm" data-svc-del="${esc(t.id)}">删除</button></div>`).join('') : '<p class="hint">暂无服务令牌</p>'}
       <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="svcCreate">新建服务令牌</button></div><div id="svcValue"></div></div>`;
     $$('#pdAccess [data-app-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/access?account=${M.acct.id}&kind=app&id=${b.dataset.appDel}`, { method: 'DELETE' }); toast('应用已删除'); loadAccess(); }
@@ -1471,7 +1490,7 @@ async function loadQueues() {
   const box = $('#pdQueues'); if (!box) return;
   try {
     const r = await api(`/api/queues?account=${M.acct.id}`);
-    box.innerHTML = r.queues.length ? r.queues.map((q) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">📬 ${esc(q.name)}<span class="hint"> · 生产者 ${q.producers ?? '—'} · 消费者 ${q.consumers ?? '—'}</span></span><button class="btn danger sm" data-q-del="${q.id}">删除</button></div>`).join('') : '<p class="hint">暂无队列</p>';
+    box.innerHTML = r.queues.length ? r.queues.map((q) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">📬 ${esc(q.name)}<span class="hint"> · 生产者 ${q.producers ?? '—'} · 消费者 ${q.consumers ?? '—'}</span></span><button class="btn danger sm" data-q-del="${esc(q.id)}">删除</button></div>`).join('') : '<p class="hint">暂无队列</p>';
     $$('#pdQueues [data-q-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/queues?account=${M.acct.id}&id=${b.dataset.qDel}`, { method: 'DELETE' }); toast('队列已删除'); loadQueues(); }
       catch (e) { toast(e.message); }
@@ -1514,7 +1533,7 @@ async function loadStream() {
   const box = $('#pdStream'); if (!box) return;
   try {
     const r = await api(`/api/stream?account=${M.acct.id}`);
-    box.innerHTML = r.unavailable ? '<p class="hint">这个账号未开通 Stream（付费产品），开通后视频会显示在这里。</p>' : (r.videos.length ? r.videos.map((v) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🎬 ${esc(v.name)} <span class="tag">${esc(v.state || '')}</span><span class="hint"> · ${Math.round(v.duration || 0)}s · ${fmtBytes(v.size || 0)}</span></span>${v.hls ? `<a href="${esc(v.hls)}" target="_blank" rel="noopener">播放链接</a>` : ''}<button class="btn danger sm" data-vid-del="${v.uid}">删除</button></div>`).join('') : '<p class="hint">暂无视频</p>');
+    box.innerHTML = r.unavailable ? '<p class="hint">这个账号未开通 Stream（付费产品），开通后视频会显示在这里。</p>' : (r.videos.length ? r.videos.map((v) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🎬 ${esc(v.name)} <span class="tag">${esc(v.state || '')}</span><span class="hint"> · ${Math.round(v.duration || 0)}s · ${fmtBytes(v.size || 0)}</span></span>${v.hls ? `<a href="${esc(v.hls)}" target="_blank" rel="noopener">播放链接</a>` : ''}<button class="btn danger sm" data-vid-del="${esc(v.uid)}">删除</button></div>`).join('') : '<p class="hint">暂无视频</p>');
     $$('#pdStream [data-vid-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
       try { await api(`/api/stream?account=${M.acct.id}&uid=${b.dataset.vidDel}`, { method: 'DELETE' }); toast('视频已删除'); loadStream(); }
       catch (e) { toast(e.message); }
@@ -1591,7 +1610,7 @@ function renderWkAdv() {
     const rb = $('#wkRoutes'); if (!rb) return;
     try {
       const r = await api(`/api/workerscode?account=${M.acct.id}&what=routes&zone=${$('#wkRouteZone').value}`);
-      rb.innerHTML = r.routes.length ? r.routes.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛣 ${esc(x.pattern)} <span class="hint">→ ${esc(x.script)}</span></span><button class="btn danger sm" data-route-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">这个域名暂无路由</p>';
+      rb.innerHTML = r.routes.length ? r.routes.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛣 ${esc(x.pattern)} <span class="hint">→ ${esc(x.script)}</span></span><button class="btn danger sm" data-route-del="${esc(x.id)}">删除</button></div>`).join('') : '<p class="hint">这个域名暂无路由</p>';
       $$('#wkRoutes [data-route-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
         try { await api(`/api/workerscode?account=${M.acct.id}&kind=route&zone=${$('#wkRouteZone').value}&id=${b.dataset.routeDel}`, { method: 'DELETE' }); toast('路由已删除'); loadRoutes(); }
         catch (err) { toast(err.message); }

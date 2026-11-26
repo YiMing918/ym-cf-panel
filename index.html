@@ -586,6 +586,8 @@ function arm(btn, fn) {
 }
 function initManage(acct, inv) {
   M.acct = acct; M.inv = inv || {};
+  M.tab = 'dns'; // 页签也要重置：v4 的「账号/产品」页签会把 M.tab 留成 account/products，loadMTab 分发表里没有这两项，不重置下次进详情页就抛 TypeError、管理区空白
+  M.d1Bm = null; // D1 导出 bookmark 是上个账号的，切账号作废
   M.zone = (M.inv.zones || [])[0]?.id || null;
   M.ns = (M.inv.kvNamespaces || [])[0]?.id || null;
   M.db = (M.inv.databases || [])[0]?.id || null;
@@ -599,7 +601,8 @@ function initManage(acct, inv) {
   loadMTab();
 }
 function loadMTab() {
-  ({ dns: loadDns, domain: loadDomain, zoneset: loadZoneset, rules: loadRules, email: loadEmail, kv: loadKv, d1: loadD1, deploy: loadDeploy, tunnel: loadTunnel, purge: loadPurge })[M.tab]();
+  const fn = ({ dns: loadDns, domain: loadDomain, zoneset: loadZoneset, rules: loadRules, email: loadEmail, kv: loadKv, d1: loadD1, deploy: loadDeploy, tunnel: loadTunnel, purge: loadPurge })[M.tab] || loadDns;
+  fn();
 }
 const zoneSel = (id) => selHtml(id, (M.inv.zones || []).map((z) => ({ value: z.id, name: z.name })), M.zone, (x) => x.name);
 const noRes = (what) => `<p class="hint">这个账号没有${what}（或令牌缺对应读取权限）。</p>`;
@@ -882,10 +885,14 @@ async function loadD1() {
   });
   $('#dbExport').addEventListener('click', async () => {
     try {
-      const r = await api('/api/d1admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, action: 'export', db: M.db }) });
-      if (r.url) { const link = document.createElement('a'); link.href = r.url; link.target = '_blank'; link.rel = 'noopener'; link.click(); toast('导出链接已打开'); }
-      else toast(r.note || '导出生成中，稍后再试');
-    } catch (e) { toast(e.message); }
+      // 后端是两段式：首次返回 bookmark，下次点击必须带上它续查同一份
+      // 导出；不带就每次新建一份、永远等不到链接。bookmark 只对当前库
+      // 有效，拿到链接或报错后清掉。
+      const bm = (M.d1Bm && M.d1Bm.db === M.db) ? M.d1Bm.bm : undefined;
+      const r = await api('/api/d1admin', { method: 'POST', body: JSON.stringify({ account: M.acct.id, action: 'export', db: M.db, bookmark: bm }) });
+      if (r.url) { M.d1Bm = null; const link = document.createElement('a'); link.href = r.url; link.target = '_blank'; link.rel = 'noopener'; link.click(); toast('导出链接已打开'); }
+      else { if (r.bookmark) M.d1Bm = { db: M.db, bm: r.bookmark }; toast(r.note || '导出生成中，稍后再试'); }
+    } catch (e) { M.d1Bm = null; toast(e.message); }
   });
   $('#dbDelete').addEventListener('click', (e) => arm(e.target, async () => {
     try { await api(`/api/d1admin?account=${M.acct.id}&db=${M.db}`, { method: 'DELETE' }); toast('数据库已删除（刷新详情生效）'); }

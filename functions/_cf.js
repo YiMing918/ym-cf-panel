@@ -43,7 +43,9 @@ async function cfFetch(account, path, opts = {}) {
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.success === false) {
       const msg = (data.errors && data.errors[0] && data.errors[0].message) || ('HTTP ' + r.status);
-      throw new Error(msg);
+      // 附上 HTTP 状态（同 _manage.js cfApi 口径）：调用方要靠它分清
+      // 「端点不适用」与「接口故障」，不能只剩一句报错文本。
+      throw Object.assign(new Error(msg), { status: r.status });
     }
     return data;
   } catch (e) {
@@ -212,7 +214,11 @@ export async function verifyToken(account) {
     const data = await cfFetch(account, '/user/tokens/verify');
     return data.result; // { id, status }
   } catch (e) {
-    if (!account.accountId) throw e;
+    // 只有「端点不适用」类错误（401/403/404）才走账号端点兜底；超时
+    // （无 status）和 5xx 是第一端点自己的故障，直接抛原错——别再多
+    // 等一轮，也别让第二端点的报错盖掉真因。
+    const s = (e && e.status) || 0;
+    if (!account.accountId || ![401, 403, 404].includes(s)) throw e;
     const data = await cfFetch(account, `/accounts/${account.accountId}/tokens/verify`);
     return data.result;
   }

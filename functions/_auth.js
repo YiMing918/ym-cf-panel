@@ -50,7 +50,10 @@ export async function verifyPassword(password, admin) {
   if (!admin || !admin.salt || !admin.hash) return false;
   if (String(admin.hash).startsWith('pbkdf2:')) {
     const parts = String(admin.hash).split(':');
-    const iter = parseInt(parts[1], 10) || PBKDF2_ITER;
+    // 迭代次数钳制（与 ym-dash 的 clampIter 同款）：admin 文档被改坏或
+    // 被篡改时，天文数字的 iter 会把一次登录拖成 DoS。存量哈希都由
+    // 本代码以 PBKDF2_ITER 生成，超出 [10000, 200000] 的只可能是坏数据。
+    const iter = Math.min(200000, Math.max(10000, parseInt(parts[1], 10) || PBKDF2_ITER));
     return timingSafeEq(await pbkdf2hex(password, admin.salt, iter), parts[2] || '');
   }
   return timingSafeEq(await sha256hex(admin.salt + ':' + password), admin.hash);

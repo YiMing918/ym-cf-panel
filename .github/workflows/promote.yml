@@ -1,6 +1,6 @@
 name: promote
 
-# 部署门控（草案，未上线）：main 的 CI 全绿，才把「CI 验过的那个提交」快进推到
+# 部署门控（2026-11-21 已上线）：main 的 CI 全绿，才把「CI 验过的那个提交」快进推到
 # production 分支；Cloudflare Pages 项目 ym-cf-panel 的生产分支改指 production 后，
 # 只有过门的提交才会触发正式部署。CI 红 → production 一步不动，线上继续跑旧版。
 #
@@ -41,7 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git fetch origin main production
+          git fetch origin main
+          # production 还不存在时（新环境首次运行）单独容错拉取，别让
+          # fetch 一个不存在的分支把整步打失败、门控无法自举（L1）
+          git fetch origin production || echo "production 分支尚不存在（首次运行），下面会以目标提交新建"
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             TARGET="${{ github.event.workflow_run.head_sha }}"
             echo "触发来源：ci 全绿，目标 = ci 验过的提交 $TARGET"
@@ -64,7 +67,7 @@ jobs:
       - name: 快进推到 production（只许快进，不强推）
         run: |
           TARGET="${{ steps.gate.outputs.target }}"
-          if [ "$(git rev-parse origin/production)" = "$TARGET" ]; then
+          if git rev-parse --verify -q origin/production >/dev/null && [ "$(git rev-parse origin/production)" = "$TARGET" ]; then
             echo "production 已经是目标提交，无需推送。"
             exit 0
           fi

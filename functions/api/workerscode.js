@@ -19,6 +19,7 @@ export async function onRequestGet({ request, env }) {
       return json({ routes: (d.result || []).map((r) => ({ id: r.id, pattern: r.pattern, script: r.script || '' })), total: d.result_info ? d.result_info.total_count : (d.result || []).length, truncated: !!(d.result_info && d.result_info.truncated) });
     }
     const script = url.searchParams.get('script');
+    if (!script) return json({ error: '缺少参数 script' }, 400);
     const resp = await fetch(`https://api.cloudflare.com/client/v4${A(acct)}/${encodeURIComponent(script)}`, {
       headers: { Authorization: `Bearer ${acct.token}` }, signal: timeoutSignal(10000),
     });

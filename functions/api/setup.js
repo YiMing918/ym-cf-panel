@@ -6,7 +6,7 @@ const WIN = 15 * 60 * 1000;
 const fails = new Map();
 function locked(ip, now) {
   const r = fails.get(ip);
-  return !!(r && now - r.winStart <= WIN && r.lockUntil > now);
+  return !!(r && r.lockUntil > now); // 只看 lockUntil 本身：窗口判定会把锁截断到窗口结束（同 login.js 的修法）
 }
 function recordFail(ip, now) {
   const r = fails.get(ip);
@@ -14,7 +14,7 @@ function recordFail(ip, now) {
   cur.n += 1;
   if (cur.n >= 5) cur.lockUntil = now + WIN;
   fails.set(ip, cur);
-  if (fails.size > 1000) for (const [k, v] of fails) if (now - v.winStart > WIN) fails.delete(k);
+  if (fails.size > 1000) for (const [k, v] of fails) if ((!v.lockUntil || v.lockUntil <= now) && now - v.winStart > WIN) fails.delete(k);
 }
 
 export async function onRequestPost({ request, env }) {

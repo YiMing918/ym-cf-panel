@@ -1,4 +1,4 @@
-import { getAdmin, verifyPassword, hashPassword, isLegacyHash, createSession, sessionCookie, json, readBody} from '../_auth.js';
+import { getAdmin, verifyPassword, hashPassword, isLegacyHash, createSession, sessionCookie, json, readBody, timingSafeEq} from '../_auth.js';
 
 // 登录失败限流：同来源 IP 15 分钟内失败 >=5 次锁定 15 分钟；另加全局
 // 失败计数——不做全局硬锁定（那会让攻击者能把站长本人锁在门外），改
@@ -54,7 +54,9 @@ const { user, password} = _lb;
 // 用户名与口令分开验：用户名不对时也照样对管理员盐跑
 // 一遍口令哈希再判失败，避免「用户名错 → 立刻返回、用户名对 → 慢」
 // 的耗时差把真实用户名漏出去（旧版是 || 短路，用户名错时不跑哈希）。
-const userOk = String(user || '').trim() === admin.user;
+// 用户名本身也用定长比较：=== 是短路比较，首字符不同就立刻返回，
+// 与上面的口径对齐（口令哈希占耗时大头，实际风险低，顺手补齐）。
+const userOk = timingSafeEq(String(user || '').trim(), String(admin.user || ''));
 const passOk = await verifyPassword(String(password || ''), admin);
 if (!userOk ||!passOk) {
 const now = Date.now();

@@ -31,7 +31,7 @@ export async function onRequestGet({ request, env }) {
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     const [apps, svct] = await Promise.all([
       cfApiAll(acct, `${A(acct)}/apps`).catch((e) => ({ error: String(e.message || e), status: (e && e.status) || 0 })),
-      cfApiAll(acct, `${A(acct)}/service_tokens`).catch(() => null),
+      cfApiAll(acct, `${A(acct)}/service_tokens`).catch((e) => ({ error: String(e.message || e), status: (e && e.status) || 0 })),
     ]);
     if (apps.error) return json({ error: friendlyAccessError(apps) }, 502);
     return json({
@@ -43,6 +43,8 @@ export async function onRequestGet({ request, env }) {
       serviceTokens: ((svct && svct.result) || []).map((x) => ({ id: x.id, name: x.name, clientId: x.client_id, expires: x.expires_at })),
       appsTotal: apps.result_info ? apps.result_info.total_count : (apps.result || []).length, appsTruncated: !!(apps.result_info && apps.result_info.truncated),
       serviceTokensTotal: svct && svct.result_info ? svct.result_info.total_count : ((svct && svct.result) || []).length, serviceTokensTruncated: !!(svct && svct.result_info && svct.result_info.truncated),
+      // 拉失败要如实标注，别让前端把「缺权限」显示成「暂无服务令牌」
+      serviceTokensError: svct && svct.error ? friendlyAccessError(svct) : '',
     });
   } catch (e) { return fail(e); }
 }

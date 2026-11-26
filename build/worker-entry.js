@@ -12,7 +12,8 @@
 //
 // 路由语义与 functions 文件路由对齐：本仓 40 个接口文件全部是方法专用导出
 // （onRequestGet/Post/Put/Delete 的组合），入口按（路径，方法）精确分发；
-// 方法未命中与 HEAD 都按原版口径落到静态层。路径匹配前去掉一个尾斜杠
+// 已知接口路径的方法未命中（含 HEAD 打 /api/*）直接回 JSON 404，不落
+// 静态层；只有路径未命中才落到静态层。路径匹配前去掉一个尾斜杠
 // （与原版文件路由的尾斜杠等价口径一致）。未命中走 env.ASSETS.fetch；资产
 // 未命中且是 GET/HEAD 时，按 Pages 在无 404.html 时的单页回退口径回
 // /index.html（原版线上即如此）。
@@ -144,15 +145,13 @@ export default {
       if (!handler) {
         return new Response(JSON.stringify({ error: 'not_found' }), { status: 404, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
       }
-      if (handler) {
-        return handler({
-          request,
-          env,
-          params: {},
-          waitUntil: ctx.waitUntil.bind(ctx),
-          next: () => serveAsset(request, env, url),
-        });
-      }
+      return handler({
+        request,
+        env,
+        params: {},
+        waitUntil: ctx.waitUntil.bind(ctx),
+        next: () => serveAsset(request, env, url),
+      });
     }
     return serveAsset(request, env, url);
   },

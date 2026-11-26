@@ -16,6 +16,7 @@ let gFails = { fails: 0, winStart: 0}; // 全局失败计数（单值，无需 M
 
 function ipState(ip, now) {
 const r = ipFails.get(ip);
+if (r && r.lockUntil && r.lockUntil > now) return r; // 锁定期不受窗口截断：锁定从触发时刻起算整 15 分钟（旧写法窗口一过锁就提前解开，失败摊到窗口尾部时实际只锁约 1 分钟）
 return r && r.winStart && now - r.winStart <= WIN? r: null;
 }
 function recordIpFail(ip, now) {

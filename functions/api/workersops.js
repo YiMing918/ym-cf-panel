@@ -8,6 +8,7 @@ export async function onRequestGet({ request, env }) {
   try {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
+    if (!url.searchParams.get('script')) return json({ error: '缺少参数 script' }, 400);
     const script = encodeURIComponent(url.searchParams.get('script'));
     const [vers, deps] = await Promise.all([
       cfApiAllNested(acct, `/accounts/${acct.accountId}/workers/scripts/${script}/versions`, 'items').catch(() => ({ result: { items: [] }, result_info: null })),

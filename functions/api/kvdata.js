@@ -3,6 +3,8 @@ import { resolveAccount, cfApi, fail } from '../_manage.js';
 import { addAudit } from '../_store.js';
 
 const base = (acct, ns) => `/accounts/${acct.accountId}/storage/kv/namespaces/${encodeURIComponent(ns)}`;
+const timeoutSignal = (ms) => { try { return AbortSignal.timeout(ms); } catch { return undefined; } };
+const badReq = (m) => Object.assign(new Error(m), { status: 400 });
 
 export async function onRequestGet({ request, env }) {
   const a = await requireAuth(env, request); if (a.error) return a.error;
@@ -10,9 +12,10 @@ export async function onRequestGet({ request, env }) {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
     const ns = url.searchParams.get('ns');
+    if (!ns) throw badReq('缺少参数 ns');
     const key = url.searchParams.get('key');
     if (key !== null && key !== undefined && url.searchParams.has('key')) {
-      const r = await fetch(`https://api.cloudflare.com/client/v4${base(acct, ns)}/values/${encodeURIComponent(key)}`, { headers: { 'Authorization': 'Bearer ' + acct.token } });
+      const r = await fetch(`https://api.cloudflare.com/client/v4${base(acct, ns)}/values/${encodeURIComponent(key)}`, { headers: { 'Authorization': 'Bearer ' + acct.token }, signal: timeoutSignal(10000) });
       if (!r.ok) throw new Error('读取失败 HTTP ' + r.status);
       // 二进制安全读：以前 r.text() 按 UTF-8 有损解码，非文本值读出来
       // 已被替换字符污染，在编辑器里再保存一次就把原值彻底写坏。
@@ -43,6 +46,7 @@ export async function onRequestPut({ request, env }) {
   try {
     const b = await readBody(request);
     const acct = await resolveAccount(env, b.account);
+    if (!b.ns || !b.key) throw badReq('缺少参数 ns 或 key');
     // binary 标记的值按 base64 解回原始字节写（前端对二进制值只读，
     // 能走到这里的是原样回写或脚本调用）；普通值维持文本写
     let putBody = String(b.value ?? '');
@@ -55,7 +59,7 @@ export async function onRequestPut({ request, env }) {
       putType = 'application/octet-stream';
     }
     const r = await fetch(`https://api.cloudflare.com/client/v4${base(acct, b.ns)}/values/${encodeURIComponent(b.key)}`, {
-      method: 'PUT', headers: { 'Authorization': 'Bearer ' + acct.token, 'Content-Type': putType }, body: putBody,
+      method: 'PUT', headers: { 'Authorization': 'Bearer ' + acct.token, 'Content-Type': putType }, body: putBody, signal: timeoutSignal(10000),
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || data.success === false) throw new Error((data.errors && data.errors[0] && data.errors[0].message) || ('HTTP ' + r.status));
@@ -69,7 +73,10 @@ export async function onRequestDelete({ request, env }) {
   try {
     const url = new URL(request.url);
     const acct = await resolveAccount(env, url.searchParams.get('account'));
-    await cfApi(acct, `${base(acct, url.searchParams.get('ns'))}/values/${encodeURIComponent(url.searchParams.get('key'))}`, { method: 'DELETE' });
+    const ns = url.searchParams.get('ns');
+    const key = url.searchParams.get('key');
+    if (!ns || !key) throw badReq('缺少参数 ns 或 key');
+    await cfApi(acct, `${base(acct, ns)}/values/${encodeURIComponent(key)}`, { method: 'DELETE' });
     await addAudit(env, a.sess.user, 'kv.delete', acct.name);
     return json({ ok: true });
   } catch (e) { return fail(e); }

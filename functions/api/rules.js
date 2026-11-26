@@ -39,14 +39,18 @@ export async function onRequestGet({ request, env }) {
     for (const rs of d.result || []) {
       if (!PHASE_LABEL[rs.phase]) continue;
       let rules = [];
+      let rulesError = '';
       try {
         const full = await cfApi(acct, `/zones/${encodeURIComponent(zone)}/rulesets/${encodeURIComponent(rs.id)}`);
         rules = ((full.result && full.result.rules) || []).map((r) => ({
           id: r.id, description: r.description || r.expression || '(无名规则)',
           expression: r.expression || '', action: r.action || '', enabled: r.enabled !== false,
         }));
-      } catch { /* keep empty */ }
-      sets.push({ id: rs.id, phase: rs.phase, label: PHASE_LABEL[rs.phase], name: rs.name || '', rules });
+      } catch (e) {
+        // 拉详情失败要如实标注，别让前端把「读取失败」显示成「暂无规则」
+        rulesError = String((e && e.message) || e);
+      }
+      sets.push({ id: rs.id, phase: rs.phase, label: PHASE_LABEL[rs.phase], name: rs.name || '', rules, rulesError });
     }
     return json({ rulesets: sets, rulesetsTotal: d.result_info ? d.result_info.total_count : (d.result || []).length, rulesetsTruncated: !!(d.result_info && d.result_info.truncated) });
   } catch (e) { return fail(e); }

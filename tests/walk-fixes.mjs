@@ -150,8 +150,8 @@ const dom = (name) => ({ name, expires_at: '2027-01-01T00:00:00Z', auto_renew: t
   };
   const r = await accessGet({ request: req('/api/access?account=a1'), env });
   const j = await r.json();
-  chk('3a Zero Trust 502：显示中文未初始化说明', j.error === '这个账号还没初始化 Zero Trust，去 Cloudflare 控制台开一次就好', JSON.stringify(j));
-  chk('3a Zero Trust 502：不再露原始 HTTP 502', !/HTTP 502/.test(String(j.error || '')), String(j.error));
+  chk('3a Zero Trust 502：200 内嵌中文未初始化说明', r.status === 200 && j.appsError === '这个账号还没初始化 Zero Trust，去 Cloudflare 控制台开一次就好', JSON.stringify(j));
+  chk('3a Zero Trust 502：不再露原始 HTTP 502', !/HTTP 502/.test(JSON.stringify(j)), JSON.stringify(j));
 }
 
 // ---- 3b) Zero Trust：令牌缺 Access 权限 → 中文权限说明 ----
@@ -165,7 +165,7 @@ const dom = (name) => ({ name, expires_at: '2027-01-01T00:00:00Z', auto_renew: t
   };
   const r = await accessGet({ request: req('/api/access?account=a1'), env });
   const j = await r.json();
-  chk('3b Zero Trust 缺权限：显示中文权限说明', j.error === '这个账号的令牌还没开 Zero Trust（Access）权限，去补上权限后这里就能看了', JSON.stringify(j));
+  chk('3b Zero Trust 缺权限：200 内嵌中文权限说明', r.status === 200 && j.appsError === '这个账号的令牌还没开 Zero Trust（Access）权限，去补上权限后这里就能看了', JSON.stringify(j));
 }
 
 globalThis.fetch = realFetch;

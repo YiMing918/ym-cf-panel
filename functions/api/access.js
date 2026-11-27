@@ -33,15 +33,20 @@ export async function onRequestGet({ request, env }) {
       cfApiAll(acct, `${A(acct)}/apps`).catch((e) => ({ error: String(e.message || e), status: (e && e.status) || 0 })),
       cfApiAll(acct, `${A(acct)}/service_tokens`).catch((e) => ({ error: String(e.message || e), status: (e && e.status) || 0 })),
     ]);
-    if (apps.error) return json({ error: friendlyAccessError(apps) }, 502);
+    // Apps 拉失败（未初始化 Zero Trust 的账号上游直接 502 等）不再回
+    // HTTP 502——那一层到了浏览器只剩一句裸的「HTTP 502」，看不出原因。
+    // 改成 200 + appsError 内嵌提示（与 serviceTokensError 同口径），
+    // 前端原样展示中文原因（2026-11-27 逐按钮实测发现）。
+    const appsError = apps.error ? friendlyAccessError(apps) : '';
     return json({
-      apps: (apps.result || []).map((x) => ({
+      appsError,
+      apps: appsError ? [] : (apps.result || []).map((x) => ({
         id: x.id, name: x.name, domain: x.domain, type: x.type,
         policies: (x.policies || []).map((p) => p.name).filter(Boolean),
         session: x.session_duration || '',
       })),
       serviceTokens: ((svct && svct.result) || []).map((x) => ({ id: x.id, name: x.name, clientId: x.client_id, expires: x.expires_at })),
-      appsTotal: apps.result_info ? apps.result_info.total_count : (apps.result || []).length, appsTruncated: !!(apps.result_info && apps.result_info.truncated),
+      appsTotal: appsError ? 0 : (apps.result_info ? apps.result_info.total_count : (apps.result || []).length), appsTruncated: !appsError && !!(apps.result_info && apps.result_info.truncated),
       serviceTokensTotal: svct && svct.result_info ? svct.result_info.total_count : ((svct && svct.result) || []).length, serviceTokensTruncated: !!(svct && svct.result_info && svct.result_info.truncated),
       // 拉失败要如实标注，别让前端把「缺权限」显示成「暂无服务令牌」
       serviceTokensError: svct && svct.error ? friendlyAccessError(svct) : '',

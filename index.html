@@ -1692,7 +1692,11 @@ async function loadR2Objects() {
     const up = $('#r2Up'); if (up) up.addEventListener('click', () => { const parts = (M.r2prefix || '').replace(/\/$/, '').split('/'); parts.pop(); M.r2prefix = parts.length ? parts.join('/') + '/' : ''; loadR2Objects(); });
     $$('#r2Files [data-r2-folder]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); M.r2prefix = el.dataset.r2Folder; loadR2Objects(); }));
     $$('#r2Files [data-r2-dl]').forEach((b) => b.addEventListener('click', async () => {
-      try { const r2 = await api(`/api/r2objects?account=${M.acct.id}&what=download&bucket=${encodeURIComponent(M.r2bucket)}&key=${encodeURIComponent(b.dataset.r2Dl)}`); window.open(r2.url, '_blank'); }
+      try { const r2 = await api(`/api/r2objects?account=${M.acct.id}&what=download&bucket=${encodeURIComponent(M.r2bucket)}&key=${encodeURIComponent(b.dataset.r2Dl)}`);
+        // 不能用 window.open：本页开弹窗的全局函数就叫 open()，顶层函数
+        // 声明会把 window.open 顶掉（拿下载址当弹窗选择器、直接报错）。
+        // 改用临时 <a target=_blank> 点击（与 ym-nav v2.1.10 同一修法）。
+        const a = document.createElement('a'); a.href = r2.url; a.target = '_blank'; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
       catch (e) { toast(e.message); }
     }));
     $$('#r2Files [data-r2-odel]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {

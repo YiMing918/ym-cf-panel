@@ -2,7 +2,7 @@
 
 把你名下**多个 Cloudflare 账号**装进一个面板：用量监控（Workers / Pages 函数、KV、D1、R2 用量与免费额度、域名流量与来源国家、状态码、热门路径、缓存命中率）+ 在线管理（DNS、域名设置、规则、邮件转发、KV/D1 数据、Pages/Workers 部署、隧道、清缓存）。部署在 Cloudflare Pages 上，**全程免费**，数据只经过你自己的账号。
 
-![版本](https://img.shields.io/badge/版本-v4.0.18-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
+![版本](https://img.shields.io/badge/版本-v4.0.19-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
 
 **[下载最新版](https://github.com/YiMing918/ym-cf-panel/releases/latest) · [博客部署教程](https://bk.ymaym.top/post/ym-cf-panel-guide)**
 
@@ -807,6 +807,7 @@ LICENSE               MIT 许可证
 
 ## 📝 版本（更新日志）
 
+- **v4.0.19（2026-11-27）**：修 R2 文件下载点了没反应：本页开弹窗的全局函数名叫 `open`，把浏览器自带的 `window.open` 顶掉了，下载时拿着下载地址去当弹窗找、直接报错。改用临时链接打开下载地址（与导航站 v2.1.10 同一根因、同一修法）。
 - **v4.0.18（2026-11-27）**：逐按钮实测修两处。① 产品页 Zero Trust · Access 在未初始化 Zero Trust 的账号上只显示一句裸「HTTP 502」——接口改为 200 回内嵌中文提示（还没初始化/缺权限），前端再兜底一层，原因看得见了；② DNS 页加关键词筛选框（按类型/名称/内容本地过滤），记录多了不用一页页翻。
 - **v4.0.17（2026-11-26）**：登录的用户名比较改定长（外部审查第三轮指出）。口令那边早就做了「用户名错也照样跑一遍哈希」防耗时差漏用户名，但用户名本身还是普通 === 短路比较——第一个字符不同就立刻返回。改用与口令同款的定长比较 timingSafeEq，口径对齐。口令哈希占耗时大头，实际风险很低，属于顺手补齐。
 - **v4.0.16（2026-11-26）**：登录校验补迭代次数钳制（外部审查指出）。密码哈希里存的 PBKDF2 迭代次数以前读出来直接用——admin 文档一旦被改坏或篡改成天文数字，一次登录就能把计算拖死（DoS）。现在钳制在 10000–200000 之间（与 ym-dash 的 clampIter 同款）；存量哈希都是本站以 100000 生成的，正常登录不受影响。

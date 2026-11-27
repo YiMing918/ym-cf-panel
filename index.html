@@ -616,7 +616,7 @@ const noRes = (what) => `<p class="hint">这个账号没有${what}（或令牌�
 async function loadDns() {
   const body = $('#mBody');
   if (!M.zone) { body.innerHTML = noRes('域名'); return; }
-  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('dnsZone')}</div></div><div id="dnsList"><p class="hint"><span class="spin"></span> 加载记录…</p></div>
+  body.innerHTML = `<div class="mrow"><div><label class="mlab">域名</label>${zoneSel('dnsZone')}</div><div><label class="mlab">筛选记录</label><input class="minput" id="dnsFilter" placeholder="🔍 名称 / 内容 / 类型关键词"></div></div><div id="dnsList"><p class="hint"><span class="spin"></span> 加载记录…</p></div>
   <div style="margin-top:14px"><b id="dnsFormTitle">新增记录</b>
   <div class="mrow">
     <div><label class="mlab">类型</label><select class="minput" id="dnsType">${['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'NS', 'CAA', 'SRV'].map((t) => `<option>${t}</option>`).join('')}</select></div>
@@ -628,6 +628,7 @@ async function loadDns() {
   </div>
   <div class="btns" style="justify-content:flex-start"><button class="btn sm" id="dnsSave">保存记录</button><button class="btn ghost sm" id="dnsCancel" style="display:none">取消编辑</button></div></div>`;
   $('#dnsZone').addEventListener('change', (e) => { M.zone = e.target.value; M.dnsEdit = null; loadDns(); });
+  $('#dnsFilter').addEventListener('input', () => renderDnsList());
   $('#dnsSave').addEventListener('click', saveDns);
   $('#dnsCancel').addEventListener('click', () => { M.dnsEdit = null; loadDns(); });
   // v3: presets + import/export
@@ -665,8 +666,19 @@ async function refreshDnsList() {
   const box = $('#dnsList'); if (!box) return;
   try {
     const r = await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}`);
-    box.innerHTML = (r.records.length ? `<div class="btns" style="justify-content:flex-start"><button class="btn danger sm" id="dnsBatchDel">删除所选</button><span class="hint">勾选多条可批量删除</span></div>` : '')
-      + (tableHtml(['', '类型', '名称', '内容', 'TTL', '代理', '操作'], r.records.map((x) => `<tr>
+    M.dnsRecords = r.records;
+    renderDnsList();
+  } catch (e) { box.innerHTML = mErr(e); }
+}
+function renderDnsList() {
+  const box = $('#dnsList'); if (!box) return;
+  const recs = M.dnsRecords || [];
+  const kw = (($('#dnsFilter') || {}).value || '').trim().toLowerCase();
+  const rows = kw ? recs.filter((x) => `${x.type} ${x.name} ${x.content}`.toLowerCase().includes(kw)) : recs;
+  {
+    box.innerHTML = (rows.length ? `<div class="btns" style="justify-content:flex-start"><button class="btn danger sm" id="dnsBatchDel">删除所选</button><span class="hint">勾选多条可批量删除</span></div>` : '')
+      + (kw ? `<p class="hint">按「${esc(kw)}」筛出 ${rows.length} / ${recs.length} 条</p>` : '')
+      + (tableHtml(['', '类型', '名称', '内容', 'TTL', '代理', '操作'], rows.map((x) => `<tr>
       <td><input type="checkbox" data-dns-check="${esc(x.id)}"></td>
       <td><b>${esc(x.type)}</b></td><td>${esc(x.name)}</td><td>${esc(x.content)}</td><td>${x.ttl === 1 ? '自动' : x.ttl}</td><td>${x.proxied ? '🟠 开' : '—'}</td>
       <td style="white-space:nowrap"><button class="btn ghost sm" data-dns-edit="${x.id}">编辑</button> <button class="btn danger sm" data-dns-del="${x.id}">删除</button></td></tr>`))
@@ -680,7 +692,7 @@ async function refreshDnsList() {
       toast(`已删除 ${ok}/${ids.length} 条`); refreshDnsList();
     }));
     box.querySelectorAll('[data-dns-edit]').forEach((b) => b.addEventListener('click', () => {
-      const rec = r.records.find((x) => x.id === b.dataset.dnsEdit); if (!rec) return;
+      const rec = recs.find((x) => x.id === b.dataset.dnsEdit); if (!rec) return;
       M.dnsEdit = rec.id;
       $('#dnsFormTitle').textContent = '编辑记录';
       $('#dnsType').value = rec.type; $('#dnsName').value = rec.name; $('#dnsContent').value = rec.content;
@@ -692,7 +704,7 @@ async function refreshDnsList() {
       try { await api(`/api/dns?account=${M.acct.id}&zone=${M.zone}&id=${b.dataset.dnsDel}`, { method: 'DELETE' }); toast('记录已删除'); refreshDnsList(); }
       catch (e) { toast(e.message); }
     })));
-  } catch (e) { box.innerHTML = mErr(e); }
+  }
 }
 async function saveDns() {
   const body = { account: M.acct.id, zone: M.zone, type: $('#dnsType').value, name: $('#dnsName').value, content: $('#dnsContent').value, ttl: $('#dnsTtl').value, priority: $('#dnsPrio').value, proxied: $('#dnsProxied').value === '1' };
@@ -1461,8 +1473,8 @@ async function loadAccess() {
   const box = $('#pdAccess'); if (!box) return;
   try {
     const r = await api(`/api/access?account=${M.acct.id}`);
-    box.innerHTML = (r.apps.length ? r.apps.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛡 ${esc(x.name)}<br><span class="small muted">${esc(x.domain)} · ${esc(x.type)}${x.policies.length ? ' · 策略 ' + x.policies.map(esc).join('、') : ''}</span></span><button class="btn danger sm" data-app-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无 Access 应用</p>')
-      + `<div class="mrow"><div><label class="mlab">新应用名</label><input class="minput" id="accAppName" placeholder="如 内部后台"></div><div><label class="mlab">域名</label><input class="minput" id="accAppDomain" placeholder="admin.example.com"></div><div><label class="mlab">允许登录的邮箱（逗号分隔）</label><input class="minput" id="accAppEmails" placeholder="me@example.com"></div><div><button class="btn sm" id="accAppCreate">新建应用</button></div></div>`
+    box.innerHTML = (r.appsError ? `<p class="hint">⚠️ Access 应用读取失败：${esc(r.appsError)}</p>` : r.apps.length ? r.apps.map((x) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🛡 ${esc(x.name)}<br><span class="small muted">${esc(x.domain)} · ${esc(x.type)}${x.policies.length ? ' · 策略 ' + x.policies.map(esc).join('、') : ''}</span></span><button class="btn danger sm" data-app-del="${x.id}">删除</button></div>`).join('') : '<p class="hint">暂无 Access 应用</p>')
+      + (r.appsError ? '' : `<div class="mrow"><div><label class="mlab">新应用名</label><input class="minput" id="accAppName" placeholder="如 内部后台"></div><div><label class="mlab">域名</label><input class="minput" id="accAppDomain" placeholder="admin.example.com"></div><div><label class="mlab">允许登录的邮箱（逗号分隔）</label><input class="minput" id="accAppEmails" placeholder="me@example.com"></div><div><button class="btn sm" id="accAppCreate">新建应用</button></div></div>`)
       + `<div style="margin-top:10px"><b>服务令牌</b>${r.serviceTokensError ? `<p class="hint">⚠️ 服务令牌读取失败：${esc(r.serviceTokensError)}</p>` : ''}${r.serviceTokens.length ? r.serviceTokens.map((t) => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><span style="flex:1">🔑 ${esc(t.name)}<br><span class="small muted">Client ID ${esc(t.clientId)}</span></span><button class="btn danger sm" data-svc-del="${esc(t.id)}">删除</button></div>`).join('') : '<p class="hint">暂无服务令牌</p>'}
       <div class="btns" style="justify-content:flex-start"><button class="btn ghost sm" id="svcCreate">新建服务令牌</button></div><div id="svcValue"></div></div>`;
     $$('#pdAccess [data-app-del]').forEach((b) => b.addEventListener('click', () => arm(b, async () => {
@@ -1473,7 +1485,7 @@ async function loadAccess() {
       try { await api(`/api/access?account=${M.acct.id}&kind=svctoken&id=${b.dataset.svcDel}`, { method: 'DELETE' }); toast('服务令牌已删除'); loadAccess(); }
       catch (e) { toast(e.message); }
     })));
-    $('#accAppCreate').addEventListener('click', async () => {
+    const accCreateBtn = $('#accAppCreate'); if (accCreateBtn) accCreateBtn.addEventListener('click', async () => {
       try { await api('/api/access', { method: 'POST', body: JSON.stringify({ account: M.acct.id, what: 'app-create', name: $('#accAppName').value, domain: $('#accAppDomain').value, emails: $('#accAppEmails').value }) }); toast('Access 应用已创建'); loadAccess(); }
       catch (e) { toast(e.message); }
     });
@@ -1484,7 +1496,7 @@ async function loadAccess() {
         loadAccess();
       } catch (e) { toast(e.message); }
     });
-  } catch (e) { box.innerHTML = mErr(e); }
+  } catch (e) { box.innerHTML = /502|bad gateway/i.test(e.message) ? '<p class="hint">⚠️ 这个账号还没初始化 Zero Trust，去 Cloudflare 控制台开一次就好</p>' : mErr(e); }
 }
 async function loadQueues() {
   const box = $('#pdQueues'); if (!box) return;

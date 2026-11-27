@@ -2,7 +2,7 @@
 
 把你名下**多个 Cloudflare 账号**装进一个面板：用量监控（Workers / Pages 函数、KV、D1、R2 用量与免费额度、域名流量与来源国家、状态码、热门路径、缓存命中率）+ 在线管理（DNS、域名设置、规则、邮件转发、KV/D1 数据、Pages/Workers 部署、隧道、清缓存）。部署在 Cloudflare Pages 上，**全程免费**，数据只经过你自己的账号。
 
-![版本](https://img.shields.io/badge/版本-v4.0.17-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
+![版本](https://img.shields.io/badge/版本-v4.0.18-blue) ![部署](https://img.shields.io/badge/部署-Cloudflare%20Pages-orange) ![许可](https://img.shields.io/badge/许可-MIT-green)
 
 **[下载最新版](https://github.com/YiMing918/ym-cf-panel/releases/latest) · [博客部署教程](https://bk.ymaym.top/post/ym-cf-panel-guide)**
 
@@ -807,6 +807,7 @@ LICENSE               MIT 许可证
 
 ## 📝 版本（更新日志）
 
+- **v4.0.18（2026-11-27）**：逐按钮实测修两处。① 产品页 Zero Trust · Access 在未初始化 Zero Trust 的账号上只显示一句裸「HTTP 502」——接口改为 200 回内嵌中文提示（还没初始化/缺权限），前端再兜底一层，原因看得见了；② DNS 页加关键词筛选框（按类型/名称/内容本地过滤），记录多了不用一页页翻。
 - **v4.0.17（2026-11-26）**：登录的用户名比较改定长（外部审查第三轮指出）。口令那边早就做了「用户名错也照样跑一遍哈希」防耗时差漏用户名，但用户名本身还是普通 === 短路比较——第一个字符不同就立刻返回。改用与口令同款的定长比较 timingSafeEq，口径对齐。口令哈希占耗时大头，实际风险很低，属于顺手补齐。
 - **v4.0.16（2026-11-26）**：登录校验补迭代次数钳制（外部审查指出）。密码哈希里存的 PBKDF2 迭代次数以前读出来直接用——admin 文档一旦被改坏或篡改成天文数字，一次登录就能把计算拖死（DoS）。现在钳制在 10000–200000 之间（与 ym-dash 的 clampIter 同款）；存量哈希都是本站以 100000 生成的，正常登录不受影响。
 - **v4.0.15（2026-11-26）**：全量复审低优先项清账（L1–L10、L12，不动业务逻辑）：①promote 门控自举——production 分支不存在时 fetch 不再整步失败，文件头注释改回「已上线」；②KV 数据接口补齐全仓统一的 10 秒超时，KV/Pages/Workers 等接口缺必填参数时直接回 400，不再把字面量 "null" 发给 Cloudflare；③令牌校验只在「端点不适用」（401/403/404）时才走账号端点兜底，超时/5xx 直接报原错，cfFetch 的错误附带 HTTP 状态；④Access 服务令牌与规则集详情拉失败如实回传错误，前端显示「读取失败」而不是误显示成「暂无」；⑤前端所有放进 HTML 属性的 Cloudflare 资源 ID 统一过转义；⑥CI 语法门禁覆盖 build/ 合成入口并补 permissions 收敛，合成入口注释与实际行为对齐、删冗余判断；⑦R2 对象接口的桶名与管理口径同规校验、续页令牌补 XML 实体解码；⑧设置弹窗页脚显示完整版本号，主题改成「保存才落盘、取消回滚」（打开弹窗先存快照，预览不写存储）。
